@@ -18,6 +18,11 @@ export TZ="${TZ:-Asia/Shanghai}"
 mkdir -p "$TMPDIR" "$HOME/试玩/dsh-backups"
 
 TARGET="${1:-latest}"
+# 更新中的标记：插件端据此禁用按钮、面板显示「正在更新」；脚本无论怎么退出都要清掉。
+FLAG="$HOME/试玩/.dsh-updating"
+rm -f "$FLAG"
+printf '%s 开始更新 → %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$TARGET" > "$FLAG"
+trap 'rm -f "$FLAG"' EXIT INT TERM
 DSH_DIR="$PREFIX_DIR/lib/node_modules/@deepseek-ai/dsh"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="$HOME/试玩/dsh-update.log"

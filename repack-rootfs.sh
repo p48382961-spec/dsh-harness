@@ -68,7 +68,9 @@ echo "  凭据已移除，首启会走 DSH 自己的登录流程"
 say "2c/5 打我们自己的载荷补丁（侧栏内置浏览器：搜索回落 + 允许下载 + 占位文案）"
 node "$PROJ/patch-payload.mjs" "$SRC" || { echo "载荷补丁失败" >&2; exit 1; }
 
-say "2d/5 装维护/更新插件（dsh-maintenance + dsh-plugin-restart + dsh-app-release）+ 我们的升级/重启脚本"
+say "2d/5 装版本/更新插件（dsh-maintenance + dsh-app-release）+ 我们的升级/重启脚本"
+# 说明：0.8.3 起不再装 dsh-plugin-restart —— 引擎重启在 App 里由 EngineService 看门狗负责，
+# 那个插件的 restart_server 只是把进程放倒，功能与看门狗重叠，且它的侧栏按钮会误导用户。
 
 # 用户要的「版本 / 检查更新」：Termux 里这两个插件提供了侧栏底部版本号、检查 npm 新版本、
 # 一键升级、重启服务。搬到 App 里的关键不是拷文件，而是**路径要落在默认值上**：
@@ -78,7 +80,7 @@ say "2d/5 装维护/更新插件（dsh-maintenance + dsh-plugin-restart + dsh-ap
 # App 的 homedir 是 /data/data/dev.dsh.harness/files/home，所以正好一一对上，不用改配置。
 NM="$SRC/home/.dsh/profiles/web/node_modules"
 mkdir -p "$NM/@deepseek-ai" "$SRC/home/试玩"
-for p in dsh-maintenance dsh-plugin-restart dsh-app-release; do
+for p in dsh-maintenance dsh-app-release; do
   rm -rf "$NM/$p"
   cp -a "$PROJ/payload/plugins/$p" "$NM/$p"
   echo "  插件 $p → profiles/web/node_modules/$p"
@@ -93,6 +95,22 @@ for d in schemastery dsh-tools; do
     echo "  警告：找不到 $src" >&2
   fi
 done
+rm -rf "$NM/dsh-plugin-restart"   # 0.8.3 起不再需要（引擎重启交给看门狗）
+# 旧 bundle 列表里如果还登记着它，也要摘掉，否则 DSH 启动时会找不到包
+python3 - "$SRC/home/.dsh/profiles/web/package.json" <<'PYDROP'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    pkg = json.load(f)
+bundles = pkg.setdefault("dsh", {}).setdefault("profile", {}).setdefault("bundles", [])
+dropped = [b for b in bundles if b == "dsh-plugin-restart"]
+if dropped:
+    pkg["dsh"]["profile"]["bundles"] = [b for b in bundles if b != "dsh-plugin-restart"]
+    with open(path, "w") as f:
+        json.dump(pkg, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("  已摘除 dsh-plugin-restart，剩: " + ", ".join(pkg["dsh"]["profile"]["bundles"]))
+PYDROP
 cp -a "$PROJ/payload/scripts/dsh-update.sh" "$SRC/home/试玩/dsh-update.sh"
 cp -a "$PROJ/payload/scripts/dsh-restart.sh" "$SRC/home/dsh-restart.sh"
 cp -a "$PROJ/payload/scripts/patch-payload.mjs" "$SRC/home/试玩/patch-payload.mjs"
@@ -105,7 +123,7 @@ path = sys.argv[1]
 with open(path) as f:
     pkg = json.load(f)
 bundles = pkg.setdefault('dsh', {}).setdefault('profile', {}).setdefault('bundles', [])
-for name in ('dsh-plugin-restart', 'dsh-maintenance', 'dsh-app-release'):
+for name in ('dsh-maintenance', 'dsh-app-release'):
     if name not in bundles:
         bundles.append(name)
 with open(path, 'w') as f:
