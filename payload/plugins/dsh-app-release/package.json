@@ -1,0 +1,26 @@
+{
+  "name": "dsh-app-release",
+  "version": "0.1.0",
+  "private": true,
+  "description": "App 自身（外壳）的版本与更新检查：读 files/app-version.txt，比对 GitHub Releases",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,4 @@
+# dsh-app-release bundle patch：在 web profile 上插入一行 host 插件。
+- insert:
+    - id: dsh-app-release
+      name: dsh-app-release

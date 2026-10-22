@@ -68,7 +68,7 @@ echo "  凭据已移除，首启会走 DSH 自己的登录流程"
 say "2c/5 打我们自己的载荷补丁（侧栏内置浏览器：搜索回落 + 允许下载 + 占位文案）"
 node "$PROJ/patch-payload.mjs" "$SRC" || { echo "载荷补丁失败" >&2; exit 1; }
 
-say "2d/5 装版本更新插件（dsh-maintenance + dsh-plugin-restart）+ 我们的升级/重启脚本"
+say "2d/5 装维护/更新插件（dsh-maintenance + dsh-plugin-restart + dsh-app-release）+ 我们的升级/重启脚本"
 
 # 用户要的「版本 / 检查更新」：Termux 里这两个插件提供了侧栏底部版本号、检查 npm 新版本、
 # 一键升级、重启服务。搬到 App 里的关键不是拷文件，而是**路径要落在默认值上**：
@@ -78,7 +78,7 @@ say "2d/5 装版本更新插件（dsh-maintenance + dsh-plugin-restart）+ 我�
 # App 的 homedir 是 /data/data/dev.dsh.harness/files/home，所以正好一一对上，不用改配置。
 NM="$SRC/home/.dsh/profiles/web/node_modules"
 mkdir -p "$NM/@deepseek-ai" "$SRC/home/试玩"
-for p in dsh-maintenance dsh-plugin-restart; do
+for p in dsh-maintenance dsh-plugin-restart dsh-app-release; do
   rm -rf "$NM/$p"
   cp -a "$PROJ/payload/plugins/$p" "$NM/$p"
   echo "  插件 $p → profiles/web/node_modules/$p"
@@ -105,7 +105,7 @@ path = sys.argv[1]
 with open(path) as f:
     pkg = json.load(f)
 bundles = pkg.setdefault('dsh', {}).setdefault('profile', {}).setdefault('bundles', [])
-for name in ('dsh-plugin-restart', 'dsh-maintenance'):
+for name in ('dsh-plugin-restart', 'dsh-maintenance', 'dsh-app-release'):
     if name not in bundles:
         bundles.append(name)
 with open(path, 'w') as f:
@@ -134,16 +134,27 @@ head -12 "$SRC/home/.dsh/settings.yaml"
 rm -rf "$SRC/home/.dsh/storages" "$SRC/home/.dsh/.anonymous-user-id" "$SRC/home/.dsh/settings.yaml.imported"
 rm -rf "$SRC/home/tmp"/* 2>/dev/null || true
 
-say "3b/5 对齐 @opentelemetry（快照带的是 0.220/2.9，缺 dsh-otel 要的 LogsExporterMetricsHelper）"
-# 证据：快照里 dsh-otel 报 "Named export 'LogsExporterMetricsHelper' not found"，
-# 而 Termux 里那份同版本 DSH（npm 装的 0.222/2.11 套）跑得通 —— 直接对齐这套"已验证可用"的依赖。
-PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
-SRC_OTEL="$PREFIX_DIR/lib/node_modules/@deepseek-ai/dsh/node_modules/@opentelemetry"
+say "3b/5 对齐 @opentelemetry（从 npm registry 取固定版本，不再依赖开发机）"
+# 证据：快照自带的 @opentelemetry 0.220 缺 dsh-otel 要的具名导出
+#   SyntaxError: Named export 'LogsExporterMetricsHelper' not found
+# 引擎启动即崩。这里换成 0.222/2.11 这一套（已在真机上验证可用）。
+# 早期版本是直接 `cp` 开发机 Termux 里的副本 —— 那是个人环境依赖，别人克隆仓库打不出包。
 DST_OTEL="$SRC/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@opentelemetry"
-[ -d "$SRC_OTEL" ] || { echo "找不到 Termux 侧的 @opentelemetry: $SRC_OTEL" >&2; exit 1; }
 rm -rf "$DST_OTEL"
-cp -a "$SRC_OTEL" "$DST_OTEL"
-echo "  已换成 Termux 侧 $(ls "$DST_OTEL" | wc -l) 个包：$(python3 -c "import json;print(json.load(open('$DST_OTEL/otlp-transformer/package.json'))['version'])")"
+mkdir -p "$DST_OTEL"
+OTEL_TMP=$(mktemp -d)
+OTEL_SPECS="api@1.9.1 api-logs@0.222.0 core@2.11.0 otlp-exporter-base@0.222.0 otlp-transformer@0.222.0 resources@2.11.0 sdk-logs@0.222.0 sdk-metrics@2.11.0 sdk-trace@2.11.0 semantic-conventions@1.43.0"
+for spec in $OTEL_SPECS; do
+  pkg="${spec%@*}"
+  ver="${spec##*@}"
+  url="https://registry.npmjs.org/@opentelemetry/${pkg}/-/${pkg}-${ver}.tgz"
+  curl -fsSL --max-time 60 "$url" -o "$OTEL_TMP/pkg.tgz" \
+    || { echo "下载失败: $url" >&2; rm -rf "$OTEL_TMP"; exit 1; }
+  mkdir -p "$DST_OTEL/$pkg"
+  tar -xzf "$OTEL_TMP/pkg.tgz" -C "$DST_OTEL/$pkg" --strip-components=1
+done
+rm -rf "$OTEL_TMP"
+echo "  已换成 registry 上的 $(ls "$DST_OTEL" | wc -l) 个包：otlp-transformer $(python3 -c "import json;print(json.load(open('$DST_OTEL/otlp-transformer/package.json'))['version'])")"
 
 say "3c/5 预置一个工作区（首启就有聊天入口，不用用户手动建文件夹）"
 # 我们删掉上游 @dsh-android/* 之后，没有任何东西替用户创建默认工作区了：首启打开只有

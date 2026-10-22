@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         Life.note(this, "MainActivity.onCreate saved=" + (saved != null));
+        writeAppVersion();
         askIgnoreBattery();
 
         // 引擎被看门狗重新拉起（升级完 / 重启脚本踢了它）之后，WebView 还抱着已经断掉的旧连接 ——
@@ -322,6 +323,23 @@ public class MainActivity extends Activity {
                 + "try{DSHBridge.log('探针已装 '+location.pathname)}catch(e){}"
                 + "})()";
         v.evaluateJavascript(js, null);
+    }
+
+    /**
+     * 把外壳版本写到 files/app-version.txt，供载荷里的 dsh-app-release 插件读取
+     * （插件查 GitHub Releases 时需要知道「现在装的是哪一版」）。
+     */
+    private void writeAppVersion() {
+        try {
+            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            int code = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+            java.io.File f = new java.io.File(getFilesDir(), "app-version.txt");
+            try (java.io.FileWriter w = new java.io.FileWriter(f, false)) {
+                w.write(version + " (" + code + ")\n");
+            }
+        } catch (Throwable t) {
+            Life.note(this, "写 app-version.txt 失败：" + t);
+        }
     }
 
     private static boolean isLocal(String u) {
