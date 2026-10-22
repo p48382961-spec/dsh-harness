@@ -385,8 +385,16 @@ public class MainActivity extends Activity {
             return;
         }
         new Thread(() -> {
-            File base = getExternalFilesDir(null);
-            File dir = new File(base != null ? base : getFilesDir(), "Download");
+            final boolean isApk = name.toLowerCase().endsWith(".apk");
+            File dir;
+            if (isApk) {
+                // 安装器要读这个文件：存到缓存目录，由 ApkProvider 以 content:// 提供，
+                // 避免 Android 7+ 的 FileUriExposedException。
+                dir = new java.io.File(getCacheDir(), "updates");
+            } else {
+                File base = getExternalFilesDir(null);
+                dir = new File(base != null ? base : getFilesDir(), "Download");
+            }
             //noinspection ResultOfMethodCallIgnored
             dir.mkdirs();
             File out = new File(dir, name);
@@ -411,12 +419,52 @@ public class MainActivity extends Activity {
                 //noinspection ResultOfMethodCallIgnored
                 part.renameTo(out);
                 Life.note(this, "下载完成 " + out + " " + out.length() + " B");
-                ui.post(() -> showToast("下载完成：" + out.getAbsolutePath()));
+                if (isApk) {
+                    ui.post(() -> installApk(out));
+                } else {
+                    ui.post(() -> showToast("下载完成：" + out.getAbsolutePath()));
+                }
             } catch (Throwable e) {
                 Life.note(this, "下载失败 " + e);
                 ui.post(() -> showToast("下载失败：" + e));
             }
         }, "download").start();
+    }
+
+    /**
+     * 下载完的 APK 直接调系统安装器。
+     *
+     * targetSdk 28 上「安装未知应用」是按应用授权（API 26+）：没授权时不能装，
+     * 这里先把自己引导到那个开关页，用户回来再点一次即可。
+     */
+    private void installApk(File apk) {
+        Life.note(this, "准备安装 " + apk.getName() + " " + apk.length() + " B");
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+                showToast("请允许「安装未知应用」后再装");
+                try {
+                    android.content.Intent settings = new android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:" + getPackageName()));
+                    settings.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(settings);
+                } catch (Throwable ignored) {
+                    // 有的 ROM 没有这个页面，只能靠用户自己去设置里开
+                }
+                return;
+            }
+            android.net.Uri uri = android.net.Uri.parse(
+                    "content://" + getPackageName() + ".apk/" + apk.getName());
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+            showToast("已交给系统安装器");
+        } catch (Throwable e) {
+            Life.note(this, "安装失败 " + e);
+            showToast("安装失败：" + e);
+        }
     }
 
     private java.io.InputStream open(String url) throws java.io.IOException {

@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 应用内下载 APK 后交给系统安装器（targetSdk 28 仍是按应用授权） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".App"
@@ -27,7 +29,13 @@
             </intent-filter>
         </activity>
 
-        <service
+        <provider
+        android:name=".ApkProvider"
+        android:authorities="dev.dsh.harness.apk"
+        android:exported="false"
+        android:grantUriPermissions="true" />
+
+    <service
             android:name=".EngineService"
             android:exported="false"
             android:stopWithTask="false" />
