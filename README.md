@@ -6,7 +6,9 @@
 
 ## 下载
 
-到 [Releases](../../releases/latest) 页面下载最新的 `dsh-harness-<version>-arm64.apk`，同一页面附 `.sha256` 校验文件。
+到 [Releases](../../releases) 页面，按版本号挑最新的 `dsh-harness-<version>-arm64.apk`（同一页附 `.sha256`）。
+
+> 版本策略：调试期用 `0.x`（目前全部标为 pre-release）；**等登录、更新、日常使用都稳了，才发 `1.0.0` 正式版**。
 
 ## 安装
 

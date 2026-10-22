@@ -63,7 +63,12 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportZoom(false);
+        // 关键：WebSettings 默认 setSupportMultipleWindows(false) —— 这时 window.open() 直接被忽略，
+        // WebChromeClient.onCreateWindow 根本不会被调用（登录就是这个流程，表现为点完没反应/黑屏）。
+        s.setSupportMultipleWindows(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
         web.setBackgroundColor(Color.parseColor("#0f1115"));
+        web.addJavascriptInterface(new Bridge(), "DSHBridge");
         wireBrowser(root);
         // 侧栏内置浏览器里的下载：WebView 自己不会保存文件，必须给 DownloadListener，
         // 否则点「下载」什么都不会发生（这就是之前"下载没法验证"的原因）。
@@ -226,6 +231,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 Life.note(MainActivity.this, "页面加载完成 " + url);
+                injectProbe(v, url);
             }
 
             @Override
@@ -252,6 +258,8 @@ public class MainActivity extends Activity {
                 ps.setDomStorageEnabled(true);
                 ps.setDatabaseEnabled(true);
                 ps.setSupportZoom(false);
+                ps.setSupportMultipleWindows(true);
+                ps.setJavaScriptCanOpenWindowsAutomatically(true);
                 w.setBackgroundColor(Color.parseColor("#0f1115"));
                 w.setWebViewClient(new WebViewClient() {
                     @Override
@@ -273,13 +281,47 @@ public class MainActivity extends Activity {
                 popup = w;
                 root.addView(w, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                // 登录成功后页面会自己 popup.close()；不接 onCloseWindow 的话这个全屏 WebView
+                // 会一直盖在最上层 —— 又是一块去不掉的黑屏。
+                // （同一个页面在授权页被转交系统浏览器后也会 close，所以两条路都覆盖了。）
                 android.webkit.WebView.WebViewTransport t =
                         (android.webkit.WebView.WebViewTransport) resultMsg.obj;
                 t.setWebView(w);
                 resultMsg.sendToTarget();
                 return true;
             }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                Life.note(MainActivity.this, "页面关闭新窗口");
+                if (window != popup) return;
+                closePopup();
+            }
         });
+    }
+
+    /** 页面 → 壳 的单向日志桥，只用来查问题（不回传任何用户数据）。 */
+    public class Bridge {
+        @android.webkit.JavascriptInterface
+        public void log(String msg) {
+            Life.note(MainActivity.this, "JS " + msg);
+        }
+    }
+
+    /**
+     * 在本地页面里装一个探针：把 window.open 的调用与结果（拿到句柄还是 null）写进日志。
+     * 登录流程就靠 window.open 开新窗口，黑屏时得知道它到底有没有被调用。
+     */
+    private void injectProbe(WebView v, String url) {
+        if (!url.startsWith("http://127.0.0.1")) return;
+        String js = "(function(){if(window.__dshbProbe)return;window.__dshbProbe=1;"
+                + "try{var o=window.open;window.open=function(u,n,f){var r=null;try{r=o.call(window,u,n,f)}catch(e){}"
+                + "try{DSHBridge.log('window.open('+String(u).slice(0,100)+','+n+') -> '+(r?'句柄':'null'))}catch(e){}"
+                + "return r;};}catch(e){try{DSHBridge.log('hook failed '+e)}catch(_){}}"
+                + "window.addEventListener('error',function(e){try{DSHBridge.log('js-error '+e.message)}catch(_){}});"
+                + "try{DSHBridge.log('探针已装 '+location.pathname)}catch(e){}"
+                + "})()";
+        v.evaluateJavascript(js, null);
     }
 
     private static boolean isLocal(String u) {

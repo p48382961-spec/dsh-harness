@@ -17,6 +17,7 @@ cd "$PROJ"
 CODE=$(sed -n 's/^CODE=//p' version.txt)
 NAME=$(sed -n 's/^NAME=//p' version.txt)
 APK="$PROJ/dist/dshb-latest.apk"
+PRE="${PRE:-true}"   # 默认预发布：调试期别把自己标成正式版；发正式版用 PRE=false
 [ -f "$APK" ] || { echo "✗ 没有 $APK，先跑 build-apk.sh" >&2; exit 1; }
 
 SHA=$(sha256sum "$APK" | awk '{print $1}')
@@ -26,7 +27,7 @@ echo "版本 $NAME ($CODE) · $((SIZE/1048576)) MB · sha256 ${SHA:0:16}…"
 
 # 1) 建 release（不存在则建；已存在则复用，避免重复上传报错）
 BODY=$(python3 - "$NAME" "$CODE" "$SHA" "$EXTRA_NOTE" <<'PY'
-import json, sys
+import json, sys, os
 name, code, sha, extra = sys.argv[1:5]
 body = f"""自带运行时的 Android App：不需要 Termux、不需要 root。
 
@@ -45,7 +46,8 @@ sha256: {sha}
 {extra or '见 README。'}
 """
 print(json.dumps({"tag_name": f"v{name}", "name": f"DSH Harness v{name}", "body": body,
-                  "draft": False, "prerelease": False, "make_latest": "true"}))
+                  "draft": False,
+                  "prerelease": os.environ.get("PRE", "true") == "true"})),
 PY
 )
 RESP=$(curl -s -X POST -H "Authorization: bearer $TOK" -H 'Accept: application/vnd.github+json' \
