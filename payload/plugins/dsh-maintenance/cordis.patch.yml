@@ -1,0 +1,10 @@
+# dsh-maintenance bundle patch：在 web profile 上插入一行 host 插件。
+#
+# DSH 启动时按 <profile>/node_modules/<name>/package.json **精确路径**打开校验，
+# 不做 Node 解析回退 —— 所以「主份」必须存在，回退份救不了它。本包同时装在
+#   ~/.dsh/profiles/web/node_modules/dsh-maintenance   （主份，pnpm 可能修剪 → 由本插件守护装回）
+#   ~/.dsh/profiles/node_modules/dsh-maintenance       （回退份，供插件内部 @deepseek-ai/* import 解析）
+# 回退份能兜住的是「本文件里 import 的 @deepseek-ai/schemastery 等」，不是 bundle 本身。
+- insert:
+    - id: dsh-maintenance
+      name: dsh-maintenance

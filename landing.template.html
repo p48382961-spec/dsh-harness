@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepSeek Harness · Android</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; min-height:100vh; display:flex; justify-content:center;
+         background:radial-gradient(120% 80% at 50% 0%, #101d2b 0%, #0a0e13 60%); color:#e6edf3;
+         font:15px/1.65 -apple-system,"Noto Sans CJK SC",system-ui,sans-serif; }
+  main { width:100%; max-width:520px; padding:40px 22px 56px; }
+  .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px;
+           color:#7ee787; background:#0f2a1a; border:1px solid #1d4a2e; }
+  h1 { margin:14px 0 2px; font-size:22px; letter-spacing:.2px; }
+  .sub { margin:0 0 22px; color:#8b949e; font-size:13px; }
+  a.dl { display:block; padding:18px; border-radius:16px; text-decoration:none; color:#e6edf3;
+         background:linear-gradient(135deg,#17324a,#0d1a26); border:1px solid #24425c;
+         box-shadow:0 10px 30px #0006; }
+  a.dl:active { transform:translateY(1px); }
+  a.dl b { display:block; font-size:17px; font-weight:650; }
+  a.dl span { display:block; margin-top:3px; font-size:12.5px; color:#9fb3c8; }
+  h2 { margin:28px 0 8px; font-size:13px; color:#8b949e; font-weight:600; letter-spacing:.4px; }
+  ol, ul { margin:0; padding-left:20px; font-size:13.5px; color:#c9d5e1; }
+  li { margin:5px 0; }
+  table { width:100%; margin-top:10px; border-collapse:collapse; font-size:12.5px; }
+  th,td { text-align:left; padding:7px 4px; border-bottom:1px solid #1b2530; }
+  th { color:#8b949e; font-weight:500; width:38%; }
+  code { font-family:ui-monospace,monospace; color:#9ecbff; word-break:break-all; }
+  .note { margin-top:26px; font-size:11.5px; color:#5c6773; line-height:1.7; }
+</style>
+</head>
+<body>
+<main>
+  <span class="badge">Android 8.0+ · 无需 root</span>
+  <h1>DeepSeek Harness</h1>
+  <p class="sub">内置运行时的独立 App · 装完就能用，不需要 Termux</p>
+
+  <a class="dl" href="dshb-latest.apk">
+    <b>下载 v{{VERSION}}</b>
+    <span>{{SIZE_MB}} MB · versionCode {{CODE}} · {{DATE}}</span>
+  </a>
+
+  <h2>安装步骤</h2>
+  <ol>
+    <li>点上面的按钮下载（{{SIZE_MB}} MB，建议 Wi-Fi）</li>
+    <li>打开下载好的 APK，允许「安装未知应用」后安装</li>
+    <li>首次启动会自动解包运行环境，约 1 分钟，期间不要退出</li>
+    <li>进入后用 DeepSeek 账号登录，或用你自己的 API Key</li>
+  </ol>
+
+  <h2>说明</h2>
+  <ul>
+    <li>语言模型、工具调用、终端、内置浏览器都在 App 内部运行，不依赖外部服务</li>
+    <li>需要常驻通知：这是 Android 允许后台运行的唯一方式，可随时在通知上停止</li>
+    <li>应用数据（对话、工作区文件）只存在本机私有目录，卸载即删除</li>
+  </ul>
+
+  <h2>校验</h2>
+  <table>
+    <tr><th>版本</th><td>v{{VERSION}}（{{CODE}}）</td></tr>
+    <tr><th>大小</th><td>{{SIZE_BYTES}} 字节</td></tr>
+    <tr><th>SHA-256</th><td><code>{{SHA256}}</code></td></tr>
+  </table>
+
+  <p class="note">
+    本页由构建机自动生成；下载地址与校验值随每次构建更新。<br>
+    内核 @deepseek-ai/dsh 0.2.1-rc.2（MIT），运行时组件取自 Termux 仓库（GPL/LGPL 等，见随包 THIRD-PARTY 说明）。
+  </p>
+</main>
+</body>
+</html>

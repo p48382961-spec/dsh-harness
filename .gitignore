@@ -1,0 +1,25 @@
+# 构建产物与运行时载荷（不进仓库：单文件 243 MB，超过 GitHub 限制）
+dist/
+build/
+build-*/
+.rel/
+.keep/
+*.apk
+*.apk.idsig
+*.keystore
+dshb-rootfs.tar.gz
+
+# 本地解包树与上游快照
+full/
+refs/
+
+# 诊断与日志（运行时产物，含本机会话信息）
+logs/
+*.log
+.log/
+engine/heartbeat
+.hb-*
+
+# 编辑器/系统
+*.swp
+.DS_Store

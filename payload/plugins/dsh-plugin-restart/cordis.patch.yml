@@ -1,0 +1,6 @@
+# dsh-plugin-restart bundle patch: 在 web profile 上插入一行 host 插件。
+# 行名从 profile 自己的 node_modules 解析（本包就装在
+# ~/.dsh/profiles/web/node_modules/dsh-plugin-restart）。
+- insert:
+    - id: restart-server
+      name: dsh-plugin-restart

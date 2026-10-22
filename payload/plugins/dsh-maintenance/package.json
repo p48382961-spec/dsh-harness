@@ -1,0 +1,32 @@
+{
+  "name": "dsh-maintenance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DSH 维护插件：查看当前版本、检查 npm 更新、并把被 pnpm 修剪掉的 dsh-plugin-restart 自动装回（原 dsh-restore-restart-plugin.sh 的插件化）",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
