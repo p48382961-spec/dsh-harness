@@ -45,7 +45,7 @@ sha256: {sha}
 {extra or '见 README。'}
 """
 print(json.dumps({"tag_name": f"v{name}", "name": f"DSH Harness v{name}", "body": body,
-                  "draft": False, "prerelease": True}))
+                  "draft": False, "prerelease": False, "make_latest": "true"}))
 PY
 )
 RESP=$(curl -s -X POST -H "Authorization: bearer $TOK" -H 'Accept: application/vnd.github+json' \

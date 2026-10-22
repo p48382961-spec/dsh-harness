@@ -41,11 +41,17 @@ final class Engine {
     /** 看门狗把引擎重新拉起来之后要跑的收尾动作（由 MainActivity 注册：刷新页面）。 */
     public static volatile Runnable onRestarted;
 
+    /** 引擎实际用的端口（默认 Build.PORT；要是被陌生实例占着就拿不到 token，只能换一个）。 */
+    private static volatile int port = Build.PORT;
+    private static File tokenFile;
+
+    static int port() { return port; }
+
     private Engine() {}
 
     /** 引擎是否可用：TCP 通 **且** HTTP 真回包（只探端口会把「node 刚绑上端口还在加载」当成好了）。 */
     static boolean isUp() {
-        return tcpOk(Build.PORT) && httpReady();
+        return tcpOk(port) && httpReady();
     }
 
     static String token() { return token; }
@@ -62,14 +68,23 @@ final class Engine {
      * @return 本次新起的引擎的 token；若引擎本来就在跑则返回 null（调用方用 cookie 打开首页即可）
      */
     static synchronized String ensure(final Context ctx, final Note note) throws Exception {
-        if (isUp()) return null;
+        final File root = Rootfs.dir(ctx);
+        tokenFile = new File(root, "engine.token");
+        engineLog = new File(root, "engine.log");
+
+        if (isUp()) {
+            // 引擎还活着（很可能是上一轮 App 进程没了、node 被前台服务留着）：token 在文件里，捡回来。
+            if (token == null) token = readToken();
+            if (token != null) return token;
+            // 端口有人应答但拿不到它的 token（例如换包名前的旧 App 还占着 3082）⇒ 换端口另起一个。
+            lastError = "端口 " + port + " 被别的实例占据，换端口重启";
+            port = freePort(Build.PORT + 1);
+        }
         if (preparing) return null;
 
         preparing = true;
         lastError = null;
         try {
-            final File root = Rootfs.dir(ctx);
-            engineLog = new File(root, "engine.log");
             flushPrevLog(root);
             killOrphan(ctx, root);
 
@@ -93,6 +108,7 @@ final class Engine {
                 return null;
             }
             token = t;
+            writeToken(t);
             return t;
         } catch (Throwable e) {
             lastError = String.valueOf(e);
@@ -107,6 +123,7 @@ final class Engine {
         Process p = proc;
         proc = null;
         token = null;
+        clearToken();
         if (p != null) {
             p.destroy(); // SIGTERM：DSH 自己会优雅收尾
         }
@@ -139,6 +156,54 @@ final class Engine {
      * 新会话再拉一个就会撞端口/连到旧实例（token 对不上，页面看似正常却发不出消息）。
      * 这里按 pid 文件认领：还活着、且命令行确实是我们的 rootfs，就发 SIGKILL 清掉。
      */
+    /** token 落盘：App 进程被杀、node 被前台服务留住时，重开 App 也能捡回同一个 token。 */
+    private static void writeToken(String t) {
+        if (tokenFile == null) return;
+        try {
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(tokenFile, false);
+            try {
+                fos.write((t + "\n").getBytes("UTF-8"));
+            } finally {
+                fos.close();
+            }
+        } catch (IOException ignored) {
+            // 写不进去只是下次得多重启一次引擎，不影响本次
+        }
+    }
+
+    private static String readToken() {
+        if (tokenFile == null || !tokenFile.isFile()) return null;
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(new java.io.FileInputStream(tokenFile), "UTF-8"));
+            try {
+                String line = r.readLine();
+                if (line == null) return null;
+                line = line.trim();
+                return line.isEmpty() ? null : line;
+            } finally {
+                r.close();
+            }
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static void clearToken() {
+        if (tokenFile != null && tokenFile.isFile()) {
+            //noinspection ResultOfMethodCallIgnored
+            tokenFile.delete();
+        }
+    }
+
+    /** 从 start 往上找一个没人监听的端口。 */
+    private static int freePort(int start) {
+        for (int p = start; p <= start + 11; p++) {
+            if (!tcpOk(p)) return p;
+        }
+        return start;
+    }
+
     private static void killOrphan(Context ctx, File root) {
         File pf = new File(root, "engine.pid");
         try {
@@ -223,7 +288,7 @@ final class Engine {
         cmd.add(binJs.getAbsolutePath());
         cmd.add("web");
         cmd.add("--port");
-        cmd.add(String.valueOf(Build.PORT));
+        cmd.add(String.valueOf(port));
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
@@ -364,7 +429,7 @@ final class Engine {
     static boolean httpReady() {
         HttpURLConnection c = null;
         try {
-            c = (HttpURLConnection) new URL("http://127.0.0.1:" + Build.PORT + "/").openConnection();
+            c = (HttpURLConnection) new URL("http://127.0.0.1:" + port + "/").openConnection();
             c.setInstanceFollowRedirects(false);
             c.setConnectTimeout(1500);
             c.setReadTimeout(2500);

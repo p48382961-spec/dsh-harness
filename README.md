@@ -18,7 +18,7 @@
 ### 校验安装包（可选，推荐）
 
 ```bash
-sha256sum dsh-harness-0.7.0-arm64.apk
+sha256sum dsh-harness-*-arm64.apk   # 换成你实际下到的文件名
 # 与 Release 页面里 .sha256 文件的内容对比
 ```
 

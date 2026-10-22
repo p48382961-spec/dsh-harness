@@ -32,6 +32,8 @@ public class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private WebView web;
+    private WebView popup;
+    private FrameLayout host;
     private TextView status;
     private volatile boolean loaded;
 
@@ -47,10 +49,12 @@ public class MainActivity extends Activity {
             WebView w = web;
             if (w == null) return;
             Life.note(this, "引擎重启完成，重新加载界面");
-            w.loadUrl("http://127.0.0.1:" + Build.PORT + "/");
+            String t = Engine.token();
+            w.loadUrl("http://127.0.0.1:" + Engine.port() + "/" + (t != null ? "?token=" + t : ""));
         });
 
-        FrameLayout root = new FrameLayout(this);
+        final FrameLayout root = new FrameLayout(this);
+        host = root;
         web = new WebView(this);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -60,7 +64,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportZoom(false);
         web.setBackgroundColor(Color.parseColor("#0f1115"));
-        web.setWebViewClient(new WebViewClient());
+        wireBrowser(root);
         // 侧栏内置浏览器里的下载：WebView 自己不会保存文件，必须给 DownloadListener，
         // 否则点「下载」什么都不会发生（这就是之前"下载没法验证"的原因）。
         web.setDownloadListener((url, ua, cd, mime, len) -> startDownload(url, cd, mime));
@@ -112,6 +116,15 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onBackPressed() {
+        if (popup != null) {
+            closePopup();
+            return;
+        }
+        super.onBackPressed();
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         // 键盘收起/切回来时系统栏可能又冒出来，重新压下去
@@ -159,8 +172,8 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            final String t = token != null ? token : Engine.token();
-            final String url = "http://127.0.0.1:" + Build.PORT + "/"
+            final String t = Engine.token() != null ? Engine.token() : token;
+            final String url = "http://127.0.0.1:" + Engine.port() + "/"
                     + (t != null ? "?token=" + t : "");
             ui.post(() -> {
                 WebView w = web;
@@ -198,6 +211,111 @@ public class MainActivity extends Activity {
     }
 
     /** 把 WebView 触发的下载落到 App 私有 Download 目录（不需要存储权限）。 */
+    /** 主 WebView 的行为：本地页面自己渲染，外部链接交给系统浏览器，新窗口单独接住。 */
+    private void wireBrowser(final FrameLayout root) {
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, android.webkit.WebResourceRequest req) {
+                String u = req.getUrl().toString();
+                Life.note(MainActivity.this, "主页面导航 " + u);
+                if (isLocal(u)) return false;
+                openExternal(u);
+                return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                Life.note(MainActivity.this, "页面加载完成 " + url);
+            }
+
+            @Override
+            public void onReceivedError(WebView v, android.webkit.WebResourceRequest req,
+                                        android.webkit.WebResourceError err) {
+                if (req == null || !req.isForMainFrame()) return;
+                String d = String.valueOf(err.getDescription());
+                Life.note(MainActivity.this, "页面加载失败 " + req.getUrl() + " " + d);
+                toast("页面加载失败：" + d);
+            }
+        });
+
+        // DSH 的「登录」是在点击处理里同步 window.open("about:blank") 拿到窗口句柄、
+        // 之后再往里导航到 device 授权页的。壳不实现 onCreateWindow 的话这个窗口根本不存在，
+        // 点了登录就只剩一个黑屏 —— 这就是 0.7.1 里那个现象。
+        web.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
+                                          android.os.Message resultMsg) {
+                Life.note(MainActivity.this, "页面请求新窗口 isDialog=" + isDialog);
+                final WebView w = new WebView(MainActivity.this);
+                WebSettings ps = w.getSettings();
+                ps.setJavaScriptEnabled(true);
+                ps.setDomStorageEnabled(true);
+                ps.setDatabaseEnabled(true);
+                ps.setSupportZoom(false);
+                w.setBackgroundColor(Color.parseColor("#0f1115"));
+                w.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, android.webkit.WebResourceRequest req) {
+                        String u = req.getUrl().toString();
+                        Life.note(MainActivity.this, "新窗口导航 " + u);
+                        if (u.startsWith("about:") || isLocal(u)) return false;
+                        // 授权页放系统浏览器里完成（那里有系统账号，也不用我们在壳里造表单）
+                        openExternal(u);
+                        closePopup();
+                        return true;
+                    }
+
+                    @Override
+                    public void onPageFinished(WebView v, String url) {
+                        Life.note(MainActivity.this, "新窗口加载完成 " + url);
+                    }
+                });
+                popup = w;
+                root.addView(w, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                android.webkit.WebView.WebViewTransport t =
+                        (android.webkit.WebView.WebViewTransport) resultMsg.obj;
+                t.setWebView(w);
+                resultMsg.sendToTarget();
+                return true;
+            }
+        });
+    }
+
+    private static boolean isLocal(String u) {
+        return u.startsWith("http://127.0.0.1") || u.startsWith("http://localhost")
+                || u.startsWith("file:") || u.startsWith("about:") || u.startsWith("data:")
+                || u.startsWith("blob:");
+    }
+
+    private void openExternal(String u) {
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            Life.note(this, "转交系统浏览器 " + u);
+        } catch (Throwable e) {
+            Life.note(this, "打不开外部链接：" + u + " " + e);
+            toast("这个链接系统里没有能打开的 App：" + u);
+        }
+    }
+
+    private void closePopup() {
+        WebView w = popup;
+        popup = null;
+        if (w == null) return;
+        if (w.getParent() instanceof ViewGroup) ((ViewGroup) w.getParent()).removeView(w);
+        w.destroy();
+        Life.note(this, "关闭新窗口");
+    }
+
+    private void toast(String msg) {
+        try {
+            android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show();
+        } catch (Throwable ignored) {
+        }
+    }
+
     private void startDownload(final String url, final String contentDisposition, final String mime) {
         final String name = guessName(url, contentDisposition);
         Life.note(this, "下载开始 " + name + " mime=" + mime + " <- " + url);
