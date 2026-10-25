@@ -23,6 +23,7 @@ window.__ModuleLoader__.load({
 		var STYLE_ID = "dsh-app-release-style-v2";
 		var SLOT_BRAND = "sidebar.brand.name";
 		var SLOT_FOOT = "sidebar.footer.action";
+		var SLOT_HEADER = "conversation.header.leading";
 		var SLOT_OVERLAY = "shell.overlay";
 
 		var reactNamespace = require("react");
@@ -246,6 +247,7 @@ window.__ModuleLoader__.load({
 				"transition:background 120ms ease,color 120ms ease}",
 				".dsar-app:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.14));color:var(--dsw-alias-label-primary,#111)}",
 				".dsar-app[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-active,rgba(127,127,127,.2));color:var(--dsw-alias-label-primary,#111)}",
+				".dsar-app-compact{padding:0 6px;font-size:13px;height:26px}",
 				".dsar-caret{width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:4.5px solid currentColor;opacity:.65}",
 				/* 底部药丸（窄轨兜底） */
 				".dsar-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));",
@@ -300,11 +302,15 @@ window.__ModuleLoader__.load({
 		}
 
 		/* ------------------------------------------------------------------ *
-		 * 顶部「应用 ▾」按钮
+		 * 「应用 ▾」按钮 —— 三处共用同一个组件：
+		 *   · conversation.header.leading（内容区顶栏左侧，手机上唯一像标题栏的位置）
+		 *   · sidebar.brand.name（宽侧栏时的品牌名旁，桌面/平板）
+		 *   · sidebar.footer.action（窄轨底部兜底，永远在）
 		 * ------------------------------------------------------------------ */
-		function BrandEntry() {
+		function AppChip(props) {
 			var store = useStore();
 			var open = Boolean(store.menu);
+			var compact = Boolean(props && props.compact);
 
 			React.useEffect(function () {
 				if (!open) return undefined;
@@ -337,7 +343,7 @@ window.__ModuleLoader__.load({
 			return h(
 				"button",
 				{
-					className: "dsar-app",
+					className: compact ? "dsar-app dsar-app-compact" : "dsar-app",
 					type: "button",
 					"aria-haspopup": "menu",
 					"aria-expanded": open ? "true" : "false",
@@ -352,30 +358,23 @@ window.__ModuleLoader__.load({
 					}
 				},
 				T.app,
-				h("span", { className: "dsar-caret", "aria-hidden": "true" })
+				h("span", { className: "dsar-caret", "aria-hidden": "true" }),
+				anyUpdate(store.info) ? h("span", { className: "dsar-dot" }) : null
 			);
 		}
 
-		/* ------------------------------------------------------------------ *
-		 * 底部药丸（窄轨兜底）
-		 * ------------------------------------------------------------------ */
+		function BrandEntry() {
+			return h(AppChip);
+		}
+
+		/** 内容区顶栏左侧：手机上侧栏永远是 56px 窄轨，brand.name 不渲染，这里是唯一能当标题栏的座位。 */
+		function HeaderEntry() {
+			return h(AppChip);
+		}
+
+		/** 窄轨底部兜底：面板切换（文件/终端/浏览器）时顶栏可能不在，这里永远在。 */
 		function FootEntry() {
-			var store = useStore();
-			var app = (store.info && store.info.app) || {};
-			var label = app.current ? "外壳 " + app.current : "外壳 --";
-			return h(
-				"button",
-				{
-					className: "dsar-pill",
-					type: "button",
-					title: "版本与更新（外壳 + 引擎）",
-					onClick: function () {
-						openView("update");
-					}
-				},
-				label,
-				anyUpdate(store.info) ? h("span", { className: "dsar-dot" }) : null
-			);
+			return h(AppChip, { compact: true });
 		}
 
 		/* ------------------------------------------------------------------ *
@@ -660,6 +659,10 @@ window.__ModuleLoader__.load({
 			});
 			ctx.slots.inject(SLOT_FOOT, function () {
 				return ctx.slots.register({ name: SLOT_FOOT, id: "app-release", order: 102 }, FootEntry);
+			});
+			// 内容区顶栏左侧（conversation.header.leading）：手机上是唯一的"标题栏"座位
+			ctx.slots.inject(SLOT_HEADER, function () {
+				return ctx.slots.register({ name: SLOT_HEADER, id: "app-release-header", order: 10 }, HeaderEntry);
 			});
 			ctx.slots.inject(SLOT_OVERLAY, function () {
 				return ctx.slots.register({ name: SLOT_OVERLAY, id: "app-release-dialog" }, OverlayEntry);
