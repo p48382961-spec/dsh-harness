@@ -1,8 +1,8 @@
 {
   "name": "dsh-app-release",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "App 自身（外壳）的版本与更新检查：读 files/app-version.txt，比对 GitHub Releases",
+  "description": "外壳与引擎的版本、检查更新与一键升级；客户端复刻桌面端的「应用」栏（关于 / 检查更新）",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
