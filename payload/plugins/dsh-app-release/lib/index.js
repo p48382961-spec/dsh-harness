@@ -243,6 +243,52 @@ function updatingFlag() {
 
 /** 15 分钟还没结束的标记视为残留（脚本被强杀、崩溃之类），顺手清掉，别把更新永久锁死。 */
 const UPDATING_TTL_MS = 15 * 60 * 1000;
+/** 升级脚本每完成一步就覆盖写这份状态；面板靠它画进度。 */
+const UPDATE_STATE = "dsh-update-state.json";
+const UPDATE_LOG = "dsh-update.log";
+/** 状态超过这个时间没更新，就当脚本卡住了（不是失败，可能只是在 npm 下载）。 */
+const STALE_MS = 2 * 60 * 1000;
+
+function updateStatePath() {
+  return join(homedir(), "试玩", UPDATE_STATE);
+}
+
+/** 读升级脚本写的状态文件；没有就返回 null。 */
+function readUpdateState() {
+  try {
+    const raw = readFileSync(updateStatePath(), "utf8");
+    const state = JSON.parse(raw);
+    const now = Date.now();
+    const idleSec = state.updatedAt ? Math.round(now / 1000 - state.updatedAt) : null;
+    return {
+      stage: state.stage ?? null,
+      label: state.label ?? null,
+      pct: typeof state.pct === "number" ? state.pct : null,
+      target: state.target ?? null,
+      from: state.from ?? null,
+      to: state.to ?? null,
+      done: Boolean(state.done),
+      error: state.error ?? null,
+      startedAt: state.startedAt ?? null,
+      updatedAt: state.updatedAt ?? null,
+      elapsedMs: state.startedAt ? Math.max(0, now - state.startedAt * 1000) : null,
+      idleSec,
+      stale: idleSec === null ? true : idleSec * 1000 > STALE_MS
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 升级日志的最后几行（面板里显示「最后在干什么」）。 */
+function updateLogTail(lines = 6) {
+  try {
+    return readFileSync(join(homedir(), "试玩", UPDATE_LOG), "utf8").trimEnd().split("\n").slice(-lines);
+  } catch {
+    return [];
+  }
+}
+
 
 function updatingNow() {
   const flag = updatingFlag();
@@ -283,8 +329,17 @@ async function buildStatus(config, { network }) {
     checked: false,
     error: null,
     updating: updatingNow(),
-    log: join(homedir(), "试玩", "dsh-update.log")
+    progress: null,
+    logTail: [],
+    log: join(homedir(), "试玩", UPDATE_LOG)
   };
+
+  // 进度：只要脚本写过状态就带上（不管更新是否已结束），面板据此显示第几步/百分比/耗时
+  const progress = readUpdateState();
+  if (progress) {
+    engine.progress = progress;
+    engine.logTail = updateLogTail(6);
+  }
 
   if (!network) {
     return { ok: true, checked: false, app, engine };
@@ -485,6 +540,9 @@ function apply(ctx, rawConfig) {
           const action = url.searchParams.get("action") ?? "status";
           try {
             if (action === "status") return Response.json(await buildStatus(config, { network: false }));
+            if (action === "log") {
+              return Response.json({ ok: true, logTail: updateLogTail(40), progress: readUpdateState() });
+            }
             if (action === "check") return Response.json(await buildStatus(config, { network: true }));
             if (action === "mirror") {
               const next = url.searchParams.get("url") ?? "";

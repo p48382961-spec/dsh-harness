@@ -67,8 +67,14 @@ window.__ModuleLoader__.load({
 			mirrorHint: "GitHub 直连下不动时，把 APK 直链填这里（本机下载服务或自己的服务器都行）。",
 			engineTitle: "引擎（DSH 本体）",
 			engineAvailable: "引擎有新版本 {version}",
+			engineRidesShell: "引擎（官方 DSH 核心）随外壳一起升级：上面的「下载并安装」会把新引擎一并换上。Android 版引擎必须是打过补丁的构建，不能从 npm 单独热更新。",
 			engineDetail: "安装完成后引擎会自动重启，页面自动刷新。",
 			engineUpdating: "正在安装新引擎，完成后自动重启…",
+			engineProgressStarting: "正在启动升级脚本…",
+			engineProgressElapsed: "已用时",
+			engineProgressStale: "已经 N 秒没有新进展 —— npm 下大包时正常，超过 5 分钟建议看下面的日志。",
+			engineProgressLog: "最近日志",
+			engineProgressDone: "升级完成，正在重启引擎…",
 			engineReady: "引擎已更新到 {version}",
 			checking: "正在检查更新…",
 			badgeUpdate: "有更新"
@@ -240,13 +246,24 @@ window.__ModuleLoader__.load({
 						});
 						return;
 					}
+					// 每 1.5 秒取一次状态：脚本会一步步写 .dsh-update-state.json，
+					// 面板据此刷新进度条、当前步骤、耗时和日志尾巴。
 					var ticks = 0;
 					var timer = setInterval(function () {
 						ticks += 1;
 						call("status")
 							.then(function (next) {
 								var engineState = (next && next.engine) || {};
+								var progress = engineState.progress || {};
 								setState({ info: next });
+								if (progress.stage === "error") {
+									clearInterval(timer);
+									setState({
+										phase: "error",
+										note: "更新失败：" + (progress.error || progress.label || "见日志")
+									});
+									return;
+								}
 								if (!engineState.updating) {
 									clearInterval(timer);
 									setState({
@@ -256,10 +273,10 @@ window.__ModuleLoader__.load({
 								}
 							})
 							.catch(function () {
-								clearInterval(timer);
+								// 引擎重启期间会短暂连不上，继续轮询即可
 							});
-						if (ticks > 200) clearInterval(timer);
-					}, 3000);
+						if (ticks > 240) clearInterval(timer);
+					}, 1500);
 				})
 				.catch(function (err) {
 					setState({
@@ -317,6 +334,24 @@ window.__ModuleLoader__.load({
 				".dsar-block{margin-top:14px;padding:12px 14px;border-radius:14px;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.08))}",
 				".dsar-block-title{font-size:13px;line-height:18px;font-weight:500;margin:0 0 2px}",
 				".dsar-block-note{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8a8f98);margin:6px 0 0}",
+				/* 升级进度 */
+				".dsar-progress{margin-top:16px;padding:14px;border-radius:16px;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.06))}",
+				".dsar-progress-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}",
+				".dsar-progress-label{font-size:13px;line-height:20px;color:var(--dsw-alias-label-primary,#111)}",
+				".dsar-progress-elapsed{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8a8f98);font-variant-numeric:tabular-nums}",
+				".dsar-bar{position:relative;height:6px;border-radius:99px;background:var(--dsw-alias-border-l2,rgba(127,127,127,.22));overflow:hidden;margin:10px 0 2px}",
+				".dsar-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--dsw-alias-brand-primary,#111);transition:width .4s ease}",
+				".dsar-steps{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}",
+				".dsar-step{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8a8f98)}",
+				".dsar-step-mark{display:inline-flex;width:14px;justify-content:center;font-size:11px}",
+				".dsar-step.is-done{color:var(--dsw-alias-label-secondary,#5b6068)}",
+				".dsar-step.is-now{color:var(--dsw-alias-label-primary,#111);font-weight:500}",
+				".dsar-step.is-now .dsar-step-mark{animation:dsar-pulse 1.2s ease-in-out infinite}",
+				".dsar-step.is-cancel{color:var(--dsw-alias-danger,#d9534f)}",
+				"@keyframes dsar-pulse{0%,100%{opacity:1}50%{opacity:.25}}",
+				".dsar-note-warn{margin:10px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-danger,#d9534f)}",
+				".dsar-logbox{margin-top:12px}",
+				".dsar-log{margin:6px 0 0;padding:10px 12px;border-radius:10px;background:var(--dsw-alias-bg-layer-1,rgba(127,127,127,.08));font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow:auto}",
 				".dsar-input{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:9px 12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font-size:13px;line-height:18px}",
 				".dsar-input:focus{outline:2px solid var(--dsw-alias-link,#4c8dff);outline-offset:1px}",
 				".dsar-row{display:flex;gap:8px;margin-top:8px}",
@@ -465,6 +500,99 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		/* 升级进度：步骤清单 + 进度条 + 耗时 + 日志尾巴 */
+		var STEPS = [
+			["prepare", "检查环境"],
+			["backup", "备份旧引擎"],
+			["install", "安装新版本"],
+			["patch", "重打载荷补丁"],
+			["prune", "清理旧备份"],
+			["restart", "重启引擎"],
+			["done", "完成"]
+		];
+
+		function stepIndex(stage) {
+			for (var i = 0; i < STEPS.length; i += 1) {
+				if (STEPS[i][0] === stage) return i;
+			}
+			return stage === "error" ? -2 : -1;
+		}
+
+		function ProgressBlock(props) {
+			var progress = props.progress || {};
+			var logTail = props.logTail || [];
+			var tick = React.useState(0);
+			React.useEffect(function () {
+				var timer = setInterval(function () {
+					tick[1](function (n) {
+						return n + 1;
+					});
+				}, 1000);
+				return function () {
+					clearInterval(timer);
+				};
+			}, []);
+			var idx = stepIndex(progress.stage);
+			var pct = typeof progress.pct === "number" ? progress.pct : 0;
+			var elapsed = progress.elapsedMs ? Math.max(0, Math.round(progress.elapsedMs / 1000) + tick[0]) : null;
+			var human = elapsed === null
+				? ""
+				: Math.floor(elapsed / 60) + ":" + String(elapsed % 60).padStart(2, "0");
+			var stale = Boolean(progress.stale) && !progress.done && idx !== -2;
+			return h(
+				"div",
+				{ className: "dsar-progress", key: "progress" },
+				h(
+					"div",
+					{ className: "dsar-progress-head" },
+					h("span", { className: "dsar-progress-label" }, progress.label || T.engineProgressStarting),
+					human ? h("span", { className: "dsar-progress-elapsed" }, T.engineProgressElapsed + " " + human) : null
+				),
+				h("div", { className: "dsar-bar" }, h("div", { className: "dsar-bar-fill", style: { width: pct + "%" } })),
+				h(
+					"ul",
+					{ className: "dsar-steps" },
+					STEPS.map(function (step, i) {
+						var cls = "dsar-step";
+						var mark = "○";
+						if (idx === -2) {
+							cls += i === 0 ? " is-cancel" : "";
+						} else if (i < idx || progress.done) {
+							cls += " is-done";
+							mark = "✓";
+						} else if (i === idx) {
+							cls += " is-now";
+							mark = "●";
+						}
+						return h(
+							"li",
+							{ className: cls, key: step[0] },
+							h("span", { className: "dsar-step-mark" }, mark),
+							h("span", null, step[1])
+						);
+					})
+				),
+				stale
+					? h(
+							"p",
+							{ className: "dsar-note-warn" },
+							T.engineProgressStale.replace("N", String(progress.idleSec == null ? "?" : progress.idleSec))
+					  )
+					: null,
+				progress.error
+					? h("p", { className: "dsar-note-warn" }, "失败：" + progress.error)
+					: null,
+				logTail.length
+					? h(
+							"div",
+							{ className: "dsar-logbox" },
+							h("p", { className: "dsar-block-note" }, T.engineProgressLog),
+							h("pre", { className: "dsar-log" }, logTail.join("\n"))
+					  )
+					: null
+			);
+		}
+
 		function VersionRow(props) {
 			return h(
 				"div",
@@ -540,6 +668,17 @@ window.__ModuleLoader__.load({
 			} else {
 				title = T.updateCheckTitle;
 				message = "检查一下有没有新版本。";
+			}
+
+			if (phase === "installing") {
+				var engineInfo = (store.info && store.info.engine) || {};
+				blocks.push(
+					h(ProgressBlock, {
+						key: "progress",
+						progress: engineInfo.progress || null,
+						logTail: engineInfo.logTail || []
+					})
+				);
 			}
 
 			if (phase === "available" || phase === "checking") {
@@ -630,19 +769,11 @@ window.__ModuleLoader__.load({
 						)
 					);
 				}
-				if (engine.updateAvailable) {
-					actions.push(
-						h(
-							"button",
-							{
-								key: "engine",
-								className: app.updateAvailable ? "dsar-btn dsar-btn-dim" : "dsar-btn dsar-btn-primary",
-								type: "button",
-								disabled: engine.updating,
-								onClick: startEngineUpdate
-							},
-							"更新引擎并重启"
-						)
+				if (engine.updateAvailable && !app.updateAvailable) {
+					// 引擎不能单独热更新：Android 上跑的引擎必须是打过补丁的构建，
+					// 只能随外壳（载荷）一起换。这里只解释，不给按钮。
+					blocks.push(
+						h("p", { key: "engine-note", className: "dsar-block-note" }, T.engineRidesShell)
 					);
 				}
 				actions.push(
