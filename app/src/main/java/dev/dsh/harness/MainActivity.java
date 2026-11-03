@@ -70,6 +70,7 @@ public class MainActivity extends Activity {
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         web.setBackgroundColor(Color.parseColor("#0f1115"));
         web.addJavascriptInterface(new Bridge(), "DSHBridge");
+        web.addJavascriptInterface(new ShellBridge(), "DSHShell");
         wireBrowser(root);
         // 侧栏内置浏览器里的下载：WebView 自己不会保存文件，必须给 DownloadListener，
         // 否则点「下载」什么都不会发生（这就是之前"下载没法验证"的原因）。
@@ -214,6 +215,63 @@ public class MainActivity extends Activity {
         boolean ok = Diag.upload(name, sb.toString());
         note(why + "\n启动日志" + (ok ? "已回传：logs/" + name : "回传失败（下载服务没开？）")
                 + "\n最后输出：\n" + String.join("\n", tail));
+        showFailurePage(why, ok ? name : null, tail);
+    }
+
+    /**
+     * 引擎没起来时，WebView 里显示一张能重试的错误页。
+     * 以前这里什么都不画，用户看到的就是一块白屏或黑屏闪一下 —— 分不清是"卡住"还是"坏了"。
+     */
+    private void showFailurePage(final String why, final String logName, final java.util.List<String> tail) {
+        ui.post(() -> {
+            final WebView w = web;
+            if (w == null) return;
+            String detail = why == null ? "" : why;
+            StringBuilder log = new StringBuilder();
+            int from = Math.max(0, tail.size() - 8);
+            for (int i = from; i < tail.size(); i++) log.append(tail.get(i)).append('\n');
+            String html = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+                    + "<body style='margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
+                    + "background:#101114;color:#eceef1;font:15px/1.65 system-ui,-apple-system,sans-serif'>"
+                    + "<div style='max-width:440px;width:100%;padding:28px;box-sizing:border-box'>"
+                    + "<div style='font-size:34px;line-height:1'>\uD83D\uDC1F</div>"
+                    + "<h1 style='font-size:19px;margin:14px 0 10px;font-weight:600'>大肥鱼没醒过来</h1>"
+                    + "<p style='margin:0 0 14px;color:#a8adb6;font-size:14px;white-space:pre-wrap'>"
+                    + esc(detail) + "</p>"
+                    + (log.length() > 0
+                        ? "<details style='margin:0 0 16px'><summary style='cursor:pointer;color:#8f959f;font-size:13px'>最后几行输出</summary>"
+                          + "<pre style='margin:8px 0 0;padding:10px 12px;border-radius:10px;background:#1b1c20;color:#9aa0a6;"
+                          + "font:11px/16px ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;max-height:140px;overflow:auto'>"
+                          + esc(log.toString()) + "</pre></details>"
+                        : "")
+                    + (logName != null
+                        ? "<p style='margin:0 0 16px;color:#6c727b;font-size:12px'>诊断日志已回传：logs/" + esc(logName) + "</p>"
+                        : "")
+                    + "<button onclick='DSHShell.retry()' style='width:100%;height:46px;border:0;border-radius:12px;"
+                    + "background:#f2f4f7;color:#111;font-size:15px;font-weight:600'>重试</button>"
+                    + "<p style='margin:12px 0 0;color:#6c727b;font-size:12px;text-align:center'>还是不行就完全退出 App 再打开</p>"
+                    + "</div></body>";
+            w.loadDataWithBaseURL("http://127.0.0.1/", html, "text/html", "utf-8", null);
+        });
+    }
+
+    /** 错误页里的文本要转义，否则日志里的尖括号会把页面吃掉。 */
+    private static String esc(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /** 错误页「重试」按钮的桥。 */
+    public class ShellBridge {
+        @android.webkit.JavascriptInterface
+        public void retry() {
+            Life.note(MainActivity.this, "错误页点了重试");
+            ui.post(() -> {
+                loaded = false;
+                note("正在重新唤醒大肥鱼…");
+                new Thread(MainActivity.this::boot, "boot-retry").start();
+            });
+        }
     }
 
     /** 把 WebView 触发的下载落到 App 私有 Download 目录（不需要存储权限）。 */
