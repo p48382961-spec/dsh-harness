@@ -59,6 +59,7 @@ window.__ModuleLoader__.load({
 			shellAvailable: "外壳有新版本 v{version}",
 			shellWaiting: "下载完成后会自动弹出系统安装界面。",
 			mirrorDetail: "走镜像地址下载（GitHub 直连不通时用）。",
+			apiFallback: "GitHub API 限流，已改用订阅源检查版本（不影响更新）。",
 			mirrorTitle: "外壳下载镜像",
 			mirrorPlaceholder: "http://…/dsh-harness-arm64.apk",
 			mirrorSave: "保存",
@@ -612,6 +613,11 @@ window.__ModuleLoader__.load({
 						h("p", { className: "dsar-block-note" }, T.mirrorHint)
 					)
 				);
+				if (app.degraded) {
+					blocks.push(
+						h("p", { className: "dsar-block-note", key: "degraded" }, T.apiFallback)
+					);
+				}
 			}
 
 			if (phase === "available") {

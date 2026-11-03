@@ -120,8 +120,8 @@ function compareVersions(a, b) {
 
 const bare = (value) => String(value ?? "").replace(/\s*\(.*$/, "").replace(/^v/, "");
 
-/** 外壳：GitHub Releases。 */
-async function checkApp(config) {
+/** 外壳（主通道）：GitHub Releases API。 */
+async function checkAppViaApi(config) {
   const response = await fetch(`https://api.github.com/repos/${config.repo}/releases?per_page=20`, {
     headers: { accept: "application/vnd.github+json", "user-agent": "dsh-harness-android" },
     signal: AbortSignal.timeout(config.timeoutMs)
@@ -148,6 +148,78 @@ async function checkApp(config) {
     apk: latest.assets.find((a) => a.name.endsWith(".apk")) ?? null,
     sum: latest.assets.find((a) => a.name.endsWith(".apk.sha256")) ?? null
   };
+}
+
+function unescapeXml(value) {
+  return String(value ?? "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/** 资产名模式：dsh-harness-<version>-arm64.apk（release.sh 生成时就是这个形状）。 */
+function artifactName(tag) {
+  return `dsh-harness-${tag}-arm64.apk`;
+}
+
+/**
+ * 外壳（备用通道）：`releases.atom`。
+ *
+ * 为什么需要它：GitHub REST API 对**未认证请求**按出口 IP 限流（60 次/小时），
+ * 本机走代理时出口 IP 是共享的，经常一上来就是 403 rate limit —— 用户看到「检查更新失败」。
+ * atom 订阅源不是 API，不限流、也不需要 token，条目里有 tag 和链接，够我们判断版本。
+ * 代价：拿不到资产大小和 release notes，所以按约定好的文件名拼出下载地址。
+ */
+async function checkAppViaAtom(config) {
+  const response = await fetch(`https://github.com/${config.repo}/releases.atom`, {
+    headers: { accept: "application/atom+xml, application/xml;q=0.9", "user-agent": "dsh-harness-android" },
+    signal: AbortSignal.timeout(config.timeoutMs)
+  });
+  if (!response.ok) throw new Error(`releases.atom 返回 ${response.status}`);
+  const text = await response.text();
+  const entries = String(text).split("<entry>").slice(1);
+  const parsed = [];
+  for (const raw of entries) {
+    const title = unescapeXml((raw.match(/<title>([\s\S]*?)<\/title>/) || [])[1] ?? "");
+    const href = (raw.match(/<link[^>]*href="([^"]+)"/) || [])[1] ?? "";
+    const updated = (raw.match(/<updated>([^<]+)<\/updated>/) || [])[1] ?? null;
+    const fromHref = href.match(/\/releases\/tag\/([^/?#]+)/);
+    const tag = bare(fromHref ? decodeURIComponent(fromHref[1]) : title);
+    if (!parseVersion(tag)) continue;
+    parsed.push({
+      tag,
+      pageUrl: href || `https://github.com/${config.repo}/releases/tag/v${tag}`,
+      title,
+      publishedAt: updated,
+      prerelease: null,
+      notes: "",
+      assets: []
+    });
+  }
+  parsed.sort((a, b) => compareVersions(b.tag, a.tag));
+  if (!parsed.length) throw new Error("atom 里没有带版本的 release");
+  const latest = parsed[0];
+  const base = `https://github.com/${config.repo}/releases/download/v${latest.tag}`;
+  const name = artifactName(latest.tag);
+  const apk = { name, url: `${base}/${name}`, size: null };
+  const sum = { name: `${name}.sha256`, url: `${base}/${name}.sha256`, size: null };
+  return { latest, apk, sum, via: "atom" };
+}
+
+/** 外壳：先 API，失败自动退到 atom（限流时仍然能查到版本）。 */
+async function checkApp(config) {
+  try {
+    const result = await checkAppViaApi(config);
+    return { ...result, via: "api" };
+  } catch (apiError) {
+    const result = await checkAppViaAtom(config).catch((atomError) => {
+      throw new Error(`${apiError.message}；atom 通道也不可用：${atomError.message}`);
+    });
+    result.degraded = `REST API 不可用（${apiError.message}），已改用 releases.atom`;
+    return result;
+  }
 }
 
 /** 引擎：npm registry 的 latest 标签。 */
@@ -221,7 +293,7 @@ async function buildStatus(config, { network }) {
   const [appResult, engineResult] = await Promise.allSettled([checkApp(config), checkEngine(config)]);
 
   if (appResult.status === "fulfilled") {
-    const { latest, apk, sum } = appResult.value;
+    const { latest, apk, sum, via, degraded } = appResult.value;
     Object.assign(app, {
       checked: true,
       latest: latest.tag,
@@ -233,7 +305,9 @@ async function buildStatus(config, { network }) {
       apkUrl: app.mirror ?? apk?.url ?? null,
       apkUrlOriginal: apk?.url ?? null,
       apkSize: apk?.size ?? null,
-      sha256Url: sum?.url ?? null
+      sha256Url: sum?.url ?? null,
+      via: via ?? "api",
+      degraded: degraded ?? null
     });
   } else {
     app.checked = true;
