@@ -738,21 +738,35 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ *
 		 * 注册
 		 * ------------------------------------------------------------------ */
+		/** 单个槽注册失败（重复注册、槽不存在）不该把整个页面带崩。 */
+		function guard(label, fn) {
+			try {
+				fn();
+			} catch (err) {
+				try {
+					window.DSHBridge && window.DSHBridge.log("app-release 注册 " + label + " 失败：" + String((err && err.message) || err));
+				} catch (ignored) {
+					/* 没有桥就只吞掉 */
+				}
+			}
+		}
+
 		function apply(ctx) {
 			ensureStyles();
 			if (!state.info && !state.loading) load(false);
-			ctx.slots.inject(SLOT_BRAND, function () {
-				return ctx.slots.register({ name: SLOT_BRAND, id: "app-release-menu", order: 40 }, BrandEntry);
+			// 只在会话顶栏（conversation.header.leading）放一个入口。
+			// 侧栏底部那个「应用」是多余的第二份 —— 手机是 56px 窄轨，底部那一栏已经有账号和设置，
+			// 再加一个同名按钮，用户看到的就是"重复出现在左下角"；而且两个注册点还会撞
+			// single slot 的重复注册检查（brand.name 只能有一个注册者）。
+			guard("header", function () {
+				ctx.slots.inject(SLOT_HEADER, function () {
+					return ctx.slots.register({ name: SLOT_HEADER, id: "app-release-header", order: 10 }, HeaderEntry);
+				});
 			});
-			ctx.slots.inject(SLOT_FOOT, function () {
-				return ctx.slots.register({ name: SLOT_FOOT, id: "app-release", order: 102 }, FootEntry);
-			});
-			// 内容区顶栏左侧（conversation.header.leading）：手机上是唯一的"标题栏"座位
-			ctx.slots.inject(SLOT_HEADER, function () {
-				return ctx.slots.register({ name: SLOT_HEADER, id: "app-release-header", order: 10 }, HeaderEntry);
-			});
-			ctx.slots.inject(SLOT_OVERLAY, function () {
-				return ctx.slots.register({ name: SLOT_OVERLAY, id: "app-release-dialog" }, OverlayEntry);
+			guard("overlay", function () {
+				ctx.slots.inject(SLOT_OVERLAY, function () {
+					return ctx.slots.register({ name: SLOT_OVERLAY, id: "app-release-dialog" }, OverlayEntry);
+				});
 			});
 		}
 

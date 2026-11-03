@@ -40,7 +40,7 @@ const Config = z.object({
   /** 补丁集目录（dsh-android-patch.mjs / dsh-update.sh / 各插件源的所在地）。 */
   patchDir: z.string().default(join(homedir(), "试玩")),
   /** 要守护的插件名。 */
-  guardedPlugin: z.string().default("dsh-plugin-restart"),
+  guardedPlugin: z.string().default("dsh-maintenance"),
   /** 本插件自己的包名（用于自检自身是否在主份里）。 */
   selfName: z.string().default("dsh-maintenance"),
   /** DSH 的 npm registry 元数据地址。 */
@@ -862,7 +862,7 @@ function apply(ctx, rawConfig) {
   const config = {
     home: rawConfig?.home ?? join(homedir(), ".dsh"),
     patchDir: rawConfig?.patchDir ?? join(homedir(), "试玩"),
-    guardedPlugin: rawConfig?.guardedPlugin ?? "dsh-plugin-restart",
+    guardedPlugin: rawConfig?.guardedPlugin ?? "dsh-maintenance",
     selfName: rawConfig?.selfName ?? "dsh-maintenance",
     registry: rawConfig?.registry ?? "https://registry.npmjs.org/@deepseek-ai/dsh",
     autoRepair: rawConfig?.autoRepair ?? true,

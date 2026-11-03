@@ -1,4 +1,6 @@
 # dsh-app-release bundle patch：在 web profile 上插入一行 host 插件。
+# （bundle 只是"打包单位"，真正把工具/接口挂上去的是这条 insert；
+#   客户端 bundle 由 dsh.client 声明，页面会单独拉 client.js。）
 - insert:
     - id: dsh-app-release
       name: dsh-app-release
