@@ -43,6 +43,24 @@ grep -rlI "$OLDPREFIX" "$SRC/usr" "$SRC/home" 2>/dev/null \
 LEFT=$(grep -rlI "$OLDPREFIX" "$SRC/usr" "$SRC/home" 2>/dev/null | wc -l || true)
 echo "  剩余命中 $LEFT（应为 0）"
 
+say "1c/5 修上游留下的绝对符号链接（432 条，全部指向 com.dsharnessmobile.shell）"
+# 上游把依赖在 profiles/node_modules 下铺了一层绝对软链，目标写死另一个包名
+# （/data/data/com.dsharnessmobile.shell/files/...）—— 在我们这儿是**断链**，
+# 一旦模块解析走到那些名字就 ENOENT/EACCES。能对上目标的重指成相对路径，对不上的删掉。
+FIXED=0; DROPPED=0
+while IFS= read -r link; do
+  [ -n "$link" ] || continue
+  tgt=$(readlink "$link")
+  rel="${tgt#*/files/}"
+  if [ "$rel" != "$tgt" ] && [ -e "$SRC/$rel" ]; then
+    newrel=$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$SRC/$rel" "$(dirname "$link")")
+    ln -sfn "$newrel" "$link"; FIXED=$((FIXED+1))
+  else
+    rm -f "$link"; DROPPED=$((DROPPED+1))
+  fi
+done <<< "$(find "$SRC/home" -type l -lname '/data/data/*' 2>/dev/null)"
+echo "  重指 $FIXED 条，删除 $DROPPED 条断链"
+
 say "2b/5 换配置文件：只用官方原生插件，丢掉 @dsh-android/* 那套"
 # 上游快照的 cordis.patch.yml 有 17 KB Android 适配，insert 了 9 个 @dsh-android 插件：
 # shell-termux / host-web-compat / ui-responsive(皮肤+Shizuku UI) / android-bridge / manage /
@@ -87,16 +105,31 @@ for p in dsh-app-release; do
   cp -a "$PROJ/payload/plugins/$p" "$NM/$p"
   echo "  插件 $p → profiles/web/node_modules/$p"
 done
-# 插件 import 的 @deepseek-ai/schemastery 与 dsh-tools 由 DSH 自带，profile 里没有则解析不到
+# 插件 import 的 @deepseek-ai/schemastery 与 dsh-tools 由 DSH 自带，profile 里没有则解析不到。
+#
+# ⚠️ 这里必须是**符号链接**，不能 cp -a 复制！
+# 0.9.1 修的就是这个：复制会造出第二份 dsh-tools，里面的 Symbol("@deepseek-ai/dsh-tools.scheduler")
+# 与宿主那份**不是同一个 Symbol** ⇒ ctx.tools[TOOL_RUNTIME_SCHEDULER] === undefined
+# ⇒ 每次工具调用都抛 TypeError，而调用已被记入日志、结果没写 ⇒ 会话尾部被修成
+# "interrupted … no result durably recorded"，用户看到的就是「工具调用错误、没法继续」。
+# 软链到同一份文件后 Node 解析到同一 realpath，Symbol 同一，问题消失。
 for d in schemastery dsh-tools; do
   src="$SRC/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/$d"
   if [ -d "$src" ]; then
-    rm -rf "$NM/@deepseek-ai/$d"; cp -a "$src" "$NM/@deepseek-ai/$d"
-    echo "  依赖 @deepseek-ai/$d → profile"
+    rm -rf "$NM/@deepseek-ai/$d"
+    ln -s "../../../../../../usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/$d" "$NM/@deepseek-ai/$d"
+    real=$(readlink -f "$NM/@deepseek-ai/$d" 2>/dev/null)
+    if [ "$real" != "$(readlink -f "$src")" ]; then
+      echo "  ✗ 符号链接解析不一致：$real ≠ $(readlink -f "$src")" >&2
+      exit 1
+    fi
+    echo "  依赖 @deepseek-ai/$d → 软链到 DSH 自带那份（同一 realpath）"
   else
     echo "  警告：找不到 $src" >&2
   fi
 done
+# 0.9.1：给载荷里的 agent-loop 打「调度器缺失」防御补丁（现场落盘 + 人话报错）
+node "$PROJ/payload/patch-agent-loop.mjs" "$SRC" || { echo "agent-loop 补丁失败" >&2; exit 1; }
 rm -rf "$NM/dsh-plugin-restart"   # 0.8.3 起不再需要（引擎重启交给看门狗）
 rm -rf "$NM/dsh-maintenance"      # 0.8.9 起不再需要（版本面板由 dsh-app-release 负责）
 # 旧 bundle 列表里如果还登记着它，也要摘掉，否则 DSH 启动时会找不到包
