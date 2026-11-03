@@ -58,6 +58,12 @@ window.__ModuleLoader__.load({
 			shellTitle: "外壳（这个 App）",
 			shellAvailable: "外壳有新版本 v{version}",
 			shellWaiting: "下载完成后会自动弹出系统安装界面。",
+			mirrorDetail: "走镜像地址下载（GitHub 直连不通时用）。",
+			mirrorTitle: "外壳下载镜像",
+			mirrorPlaceholder: "http://…/dsh-harness-arm64.apk",
+			mirrorSave: "保存",
+			mirrorClear: "清除",
+			mirrorHint: "GitHub 直连下不动时，把 APK 直链填这里（本机下载服务或自己的服务器都行）。",
 			engineTitle: "引擎（DSH 本体）",
 			engineAvailable: "引擎有新版本 {version}",
 			engineDetail: "安装完成后引擎会自动重启，页面自动刷新。",
@@ -194,6 +200,25 @@ window.__ModuleLoader__.load({
 			window.location.href = app.apkUrl;
 		}
 
+		function saveMirror(value) {
+			setState({ loading: true, note: null });
+			fetch(API + "?action=mirror&url=" + encodeURIComponent(String(value || "").trim()), {
+				method: "POST",
+				credentials: "same-origin"
+			})
+				.then(function (response) {
+					return response.json();
+				})
+				.then(function (result) {
+					if (!result || !result.ok) throw new Error((result && result.error) || "保存失败");
+					setState({ loading: false, note: result.note || "已保存。" });
+					load(false);
+				})
+				.catch(function (err) {
+					setState({ loading: false, note: "保存镜像失败：" + String((err && err.message) || err) });
+				});
+		}
+
 		function startEngineUpdate() {
 			var engine = (state.info && state.info.engine) || {};
 			var target = engine.latest;
@@ -291,6 +316,10 @@ window.__ModuleLoader__.load({
 				".dsar-block{margin-top:14px;padding:12px 14px;border-radius:14px;background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.08))}",
 				".dsar-block-title{font-size:13px;line-height:18px;font-weight:500;margin:0 0 2px}",
 				".dsar-block-note{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8a8f98);margin:6px 0 0}",
+				".dsar-input{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:9px 12px;border-radius:12px;border:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.28));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font-size:13px;line-height:18px}",
+				".dsar-input:focus{outline:2px solid var(--dsw-alias-link,#4c8dff);outline-offset:1px}",
+				".dsar-row{display:flex;gap:8px;margin-top:8px}",
+				".dsar-btn-small{padding:6px 12px;font-size:13px;min-height:0}",
 				".dsar-actions{display:flex;flex-direction:column;gap:8px;margin-top:20px}",
 				".dsar-btn{min-height:44px;padding:9px 16px;border-radius:12px;border:1px solid transparent;font-size:14px;",
 				"line-height:22px;cursor:pointer;font-family:inherit}",
@@ -520,7 +549,7 @@ window.__ModuleLoader__.load({
 							{ className: "dsar-block", key: "shell" },
 							h("p", { className: "dsar-block-title" }, T.shellTitle),
 							h(VersionRow, { label: "当前", from: app.current, to: "v" + app.latest }),
-							h("p", { className: "dsar-block-note" }, T.updateDetail)
+							h("p", { className: "dsar-block-note" }, app.mirror ? T.mirrorDetail : T.updateDetail)
 						)
 					);
 				}
@@ -535,6 +564,54 @@ window.__ModuleLoader__.load({
 						)
 					);
 				}
+			}
+
+			if (phase === "available" || phase === "checking" || phase === "latest") {
+				var mirrorInput = h("input", {
+					key: "mirror-input",
+					className: "dsar-input",
+					type: "text",
+					value: app.mirror || "",
+					placeholder: T.mirrorPlaceholder,
+					spellcheck: false
+				});
+				blocks.push(
+					h(
+						"div",
+						{ className: "dsar-block", key: "mirror" },
+						h("p", { className: "dsar-block-title" }, T.mirrorTitle),
+						mirrorInput,
+						h(
+							"div",
+							{ className: "dsar-row" },
+							h(
+								"button",
+								{
+									key: "mirror-save",
+									className: "dsar-btn dsar-btn-secondary dsar-btn-small",
+									type: "button",
+									onClick: function () {
+										saveMirror(mirrorInput.value);
+									}
+								},
+								T.mirrorSave
+							),
+							h(
+								"button",
+								{
+									key: "mirror-clear",
+									className: "dsar-btn dsar-btn-secondary dsar-btn-small",
+									type: "button",
+									onClick: function () {
+										saveMirror("");
+									}
+								},
+								T.mirrorClear
+							)
+						),
+						h("p", { className: "dsar-block-note" }, T.mirrorHint)
+					)
+				);
 			}
 
 			if (phase === "available") {

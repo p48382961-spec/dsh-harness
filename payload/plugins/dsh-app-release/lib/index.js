@@ -39,6 +39,40 @@ function filesRoot() {
   return dirname(homedir());
 }
 
+/**
+ * 下载镜像（可选）：`~/试玩/.dsh-mirror` 的首行 URL。
+ *
+ * 为什么需要它：GitHub 的 `github.com` 在某些网络下连不上（资产下载要经过它 302 到
+ * objects.githubusercontent.com），但 `api.github.com` 往往还是通的 —— 于是「能查到有新版本、
+ * 却下不动」。把 APK 放到自己的服务器/局域网/隧道上，在这里写一行地址就能装。
+ */
+/** 写/清镜像地址（客户端面板里改）。空串 = 清除。 */
+function setMirror(next) {
+  const file = join(homedir(), "试玩", ".dsh-mirror");
+  const value = String(next ?? "").trim();
+  if (!value) {
+    try {
+      unlinkSync(file);
+    } catch {
+      /* 本来就没有 */
+    }
+    return null;
+  }
+  if (!/^https?:\/\//i.test(value)) throw new Error("镜像地址必须是 http(s) 链接");
+  writeFileSync(file, value + "\n", "utf8");
+  return value;
+}
+
+function mirrorUrl() {
+  try {
+    const text = readFileSync(join(homedir(), "试玩", ".dsh-mirror"), "utf8");
+    const first = String(text).split(/\r?\n/)[0].trim();
+    return /^https?:\/\//i.test(first) ? first : null;
+  } catch {
+    return null;
+  }
+}
+
 function readTrimmed(file) {
   try {
     return readFileSync(file, "utf8").trim() || null;
@@ -167,7 +201,8 @@ async function buildStatus(config, { network }) {
     latest: null,
     updateAvailable: false,
     checked: false,
-    error: null
+    error: null,
+    mirror: mirrorUrl()
   };
   const engine = {
     current: local.engine,
@@ -195,7 +230,8 @@ async function buildStatus(config, { network }) {
       publishedAt: latest.publishedAt,
       pageUrl: latest.pageUrl,
       notes: latest.notes,
-      apkUrl: apk?.url ?? null,
+      apkUrl: app.mirror ?? apk?.url ?? null,
+      apkUrlOriginal: apk?.url ?? null,
       apkSize: apk?.size ?? null,
       sha256Url: sum?.url ?? null
     });
@@ -376,6 +412,15 @@ function apply(ctx, rawConfig) {
           try {
             if (action === "status") return Response.json(await buildStatus(config, { network: false }));
             if (action === "check") return Response.json(await buildStatus(config, { network: true }));
+            if (action === "mirror") {
+              const next = url.searchParams.get("url") ?? "";
+              const saved = setMirror(next);
+              return Response.json({
+                ok: true,
+                mirror: saved,
+                note: saved ? `镜像已设为 ${saved}` : "镜像已清除，改回 GitHub 直连"
+              });
+            }
             if (action === "update-engine") {
               const started = startEngineUpdate(config, url.searchParams.get("version"));
               process.stderr.write(`[dsh-app-release] 引擎更新已启动 → ${started.target}（pid ${started.pid}）\n`);
