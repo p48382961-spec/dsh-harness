@@ -180,7 +180,17 @@ window.__ModuleLoader__.load({
 				return;
 			}
 			setState({ phase: "downloading", detail: T.shellWaiting });
-			// 交给 WebView 的下载监听：Java 侧落盘 + 拉起系统安装器
+			// 优先走壳的 JS 桥（Java 内下载 + 自动拉起系统安装器）；
+			// 直接导航会被 shouldOverrideUrlLoading 当成外部链接丢给浏览器，用户看到的是「点了没反应」。
+			var bridge = window.DSHBridge;
+			if (bridge && typeof bridge.download === "function") {
+				try {
+					bridge.download(app.apkUrl);
+					return;
+				} catch (err) {
+					/* 桥挂了就退回导航 */
+				}
+			}
 			window.location.href = app.apkUrl;
 		}
 

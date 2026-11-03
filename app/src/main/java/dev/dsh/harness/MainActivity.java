@@ -225,6 +225,11 @@ public class MainActivity extends Activity {
                 String u = req.getUrl().toString();
                 Life.note(MainActivity.this, "主页面导航 " + u);
                 if (isLocal(u)) return false;
+                if (looksLikeApk(u)) {
+                    Life.note(MainActivity.this, "页面链接是 APK，走 App 内下载");
+                    startDownload(u, null, null);
+                    return true;
+                }
                 openExternal(u);
                 return true;
             }
@@ -268,6 +273,11 @@ public class MainActivity extends Activity {
                         String u = req.getUrl().toString();
                         Life.note(MainActivity.this, "新窗口导航 " + u);
                         if (u.startsWith("about:") || isLocal(u)) return false;
+                        if (looksLikeApk(u)) {
+                            startDownload(u, null, null);
+                            closePopup();
+                            return true;
+                        }
                         // 授权页放系统浏览器里完成（那里有系统账号，也不用我们在壳里造表单）
                         openExternal(u);
                         closePopup();
@@ -307,6 +317,17 @@ public class MainActivity extends Activity {
         public void log(String msg) {
             Life.note(MainActivity.this, "JS " + msg);
         }
+
+        /**
+         * 页面里点「下载更新」时直接调这里。
+         * 走导航的话会被 shouldOverrideUrlLoading 当成外部链接丢给浏览器（用户看到的就是「点了没反应」）。
+         */
+        @android.webkit.JavascriptInterface
+        public void download(String url) {
+            if (url == null || url.isEmpty()) return;
+            Life.note(MainActivity.this, "JS 请求下载 " + url);
+            startDownload(url, null, null);
+        }
     }
 
     /**
@@ -340,6 +361,13 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             Life.note(this, "写 app-version.txt 失败：" + t);
         }
+    }
+
+    /** 下载链接是不是一个 APK（GitHub release 资产就是 .../<name>.apk）。 */
+    private static boolean looksLikeApk(String u) {
+        if (u == null) return false;
+        String path = u.split("[?#]")[0].toLowerCase();
+        return path.endsWith(".apk");
     }
 
     private static boolean isLocal(String u) {
