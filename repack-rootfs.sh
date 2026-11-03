@@ -68,7 +68,7 @@ echo "  凭据已移除，首启会走 DSH 自己的登录流程"
 say "2c/5 打我们自己的载荷补丁（侧栏内置浏览器：搜索回落 + 允许下载 + 占位文案）"
 node "$PROJ/patch-payload.mjs" "$SRC" || { echo "载荷补丁失败" >&2; exit 1; }
 
-say "2d/5 装版本/更新插件（dsh-maintenance + dsh-app-release）+ 我们的升级/重启脚本"
+say "2d/5 装版本/更新插件（只装 dsh-app-release）+ 我们的升级/重启脚本"
 # 说明：0.8.3 起不再装 dsh-plugin-restart —— 引擎重启在 App 里由 EngineService 看门狗负责，
 # 那个插件的 restart_server 只是把进程放倒，功能与看门狗重叠，且它的侧栏按钮会误导用户。
 
@@ -80,7 +80,9 @@ say "2d/5 装版本/更新插件（dsh-maintenance + dsh-app-release）+ 我们�
 # App 的 homedir 是 /data/data/dev.dsh.harness/files/home，所以正好一一对上，不用改配置。
 NM="$SRC/home/.dsh/profiles/web/node_modules"
 mkdir -p "$NM/@deepseek-ai" "$SRC/home/试玩"
-for p in dsh-maintenance dsh-app-release; do
+# 0.8.9 起不再装 dsh-maintenance：它查的是 npm 上的 DSH 本体、侧栏底部还要挂一个版本号按钮，
+# 在 App 里那是重复入口（我们自己有 dsh-app-release 管外壳 + 引擎两个版本），用户看到的是"旧插件没删掉"。
+for p in dsh-app-release; do
   rm -rf "$NM/$p"
   cp -a "$PROJ/payload/plugins/$p" "$NM/$p"
   echo "  插件 $p → profiles/web/node_modules/$p"
@@ -96,6 +98,7 @@ for d in schemastery dsh-tools; do
   fi
 done
 rm -rf "$NM/dsh-plugin-restart"   # 0.8.3 起不再需要（引擎重启交给看门狗）
+rm -rf "$NM/dsh-maintenance"      # 0.8.9 起不再需要（版本面板由 dsh-app-release 负责）
 # 旧 bundle 列表里如果还登记着它，也要摘掉，否则 DSH 启动时会找不到包
 python3 - "$SRC/home/.dsh/profiles/web/package.json" <<'PYDROP'
 import json, sys
@@ -103,13 +106,13 @@ path = sys.argv[1]
 with open(path) as f:
     pkg = json.load(f)
 bundles = pkg.setdefault("dsh", {}).setdefault("profile", {}).setdefault("bundles", [])
-dropped = [b for b in bundles if b == "dsh-plugin-restart"]
+dropped = [b for b in bundles if b in ("dsh-plugin-restart", "dsh-maintenance")]
 if dropped:
-    pkg["dsh"]["profile"]["bundles"] = [b for b in bundles if b != "dsh-plugin-restart"]
+    pkg["dsh"]["profile"]["bundles"] = [b for b in bundles if b not in ("dsh-plugin-restart", "dsh-maintenance")]
     with open(path, "w") as f:
         json.dump(pkg, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print("  已摘除 dsh-plugin-restart，剩: " + ", ".join(pkg["dsh"]["profile"]["bundles"]))
+    print("  已摘除 " + ", ".join(dropped) + "，剩: " + ", ".join(pkg["dsh"]["profile"]["bundles"]))
 PYDROP
 cp -a "$PROJ/payload/scripts/dsh-update.sh" "$SRC/home/试玩/dsh-update.sh"
 cp -a "$PROJ/payload/scripts/dsh-restart.sh" "$SRC/home/dsh-restart.sh"
@@ -123,7 +126,7 @@ path = sys.argv[1]
 with open(path) as f:
     pkg = json.load(f)
 bundles = pkg.setdefault('dsh', {}).setdefault('profile', {}).setdefault('bundles', [])
-for name in ('dsh-maintenance', 'dsh-app-release'):
+for name in ('dsh-app-release',):
     if name not in bundles:
         bundles.append(name)
 with open(path, 'w') as f:

@@ -340,7 +340,8 @@ public class MainActivity extends Activity {
                 + "try{var o=window.open;window.open=function(u,n,f){var r=null;try{r=o.call(window,u,n,f)}catch(e){}"
                 + "try{DSHBridge.log('window.open('+String(u).slice(0,100)+','+n+') -> '+(r?'句柄':'null'))}catch(e){}"
                 + "return r;};}catch(e){try{DSHBridge.log('hook failed '+e)}catch(_){}}"
-                + "window.addEventListener('error',function(e){try{DSHBridge.log('js-error '+e.message)}catch(_){}});"
+                + "window.addEventListener('error',function(e){try{var w=e.filename?String(e.filename).slice(-60):'';"
+                + "DSHBridge.log('js-error '+e.message+(w?' @'+w+':'+e.lineno:'')+(e.error&&e.error.stack?' '+String(e.error.stack).split('\\n')[0].slice(0,120):''))}catch(_){}});"
                 + "try{DSHBridge.log('探针已装 '+location.pathname)}catch(e){}"
                 + "})()";
         v.evaluateJavascript(js, null);
