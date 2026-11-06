@@ -418,7 +418,10 @@ async function buildStatus(config, { network }) {
   }
 
   if (engineResult.status === "fulfilled") {
-    const { latest, pageUrl } = engineResult.value;
+    // 引擎检查返回的对象字段名是 version（api/atom 两条路都是），这里兼容两种叫法——
+    // 0.10.21 就是漏了这一步：latest 恒为 undefined，面板只显示外壳的更新。
+    const latest = engineResult.value.version ?? engineResult.value.latest ?? null;
+    const { pageUrl } = engineResult.value;
     Object.assign(engine, {
       checked: true,
       latest,
