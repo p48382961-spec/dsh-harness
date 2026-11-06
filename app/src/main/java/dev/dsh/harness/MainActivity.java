@@ -535,10 +535,36 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * 把下载进度推给页面里的 JS（{@code window.__dshDl}），面板据此画进度条。
+     * 之前是每 4 MB 弹一个 toast —— 又吵又不精确，0.10.4 换成实时进度条。
+     */
+    private void dlProgress(String name, long done, long total, String state) {
+        final WebView w = web;
+        if (w == null) return;
+        final String js = "window.__dshDl&&window.__dshDl("
+                + jsStr(name) + "," + done + "," + total + "," + jsStr(state) + ")";
+        ui.post(() -> {
+            WebView v = web;
+            if (v != null) v.evaluateJavascript(js, null);
+        });
+    }
+
+    private static String jsStr(String s) {
+        if (s == null) return "null";
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') b.append('\\').append(c);
+            else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+            else b.append(c);
+        }
+        return b.append('"').toString();
+    }
+
     private void startDownload(final String url, final String contentDisposition, final String mime) {
         final String name = guessName(url, contentDisposition);
         Life.note(this, "下载开始 " + name + " mime=" + mime + " <- " + url);
-        showToast("开始下载：" + name);
         if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
             showToast("这个地址没法下载：" + url);
             return;
@@ -558,20 +584,30 @@ public class MainActivity extends Activity {
             dir.mkdirs();
             File out = new File(dir, name);
             File part = new File(dir, name + ".part");
-            try (java.io.InputStream in = open(url)) {
-                try (java.io.OutputStream os = new java.io.BufferedOutputStream(
-                        new java.io.FileOutputStream(part), 256 * 1024)) {
+            java.net.HttpURLConnection conn = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setInstanceFollowRedirects(true);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) DSHShell");
+                final long expect = Math.max(0L, conn.getContentLengthLong());
+                dlProgress(name, 0, expect, "start");
+                long total = 0;
+                try (java.io.InputStream in = conn.getInputStream();
+                     java.io.OutputStream os = new java.io.BufferedOutputStream(
+                             new java.io.FileOutputStream(part), 256 * 1024)) {
                     byte[] buf = new byte[256 * 1024];
-                    long total = 0;
-                    long lastNote = 0;
+                    long lastTick = 0;
                     int n;
                     while ((n = in.read(buf)) > 0) {
                         os.write(buf, 0, n);
                         total += n;
-                        if (total - lastNote >= 4L * 1024 * 1024) {
-                            lastNote = total;
-                            final long t = total;
-                            ui.post(() -> showToast("下载中：" + (t / 1048576) + " MB"));
+                        // 进度实时推给页面（浮动卡片里的进度条），节流到 ~120ms，别把主线程刷爆
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (now - lastTick >= 120) {
+                            lastTick = now;
+                            dlProgress(name, total, expect, "downloading");
                         }
                     }
                 }
@@ -581,21 +617,19 @@ public class MainActivity extends Activity {
                 if (isApk) {
                     ui.post(() -> installApk(out));
                 } else {
+                    dlProgress(name, out.length(), out.length(), "done");
                     ui.post(() -> showToast("下载完成：" + out.getAbsolutePath()));
                 }
             } catch (Throwable e) {
                 Life.note(this, "下载失败 " + e);
+                dlProgress(name, 0, 0, "error");
                 ui.post(() -> showToast("下载失败：" + e));
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         }, "download").start();
     }
 
-    /**
-     * 下载完的 APK 直接调系统安装器。
-     *
-     * targetSdk 28 上「安装未知应用」是按应用授权（API 26+）：没授权时不能装，
-     * 这里先把自己引导到那个开关页，用户回来再点一次即可。
-     */
     private void installApk(File apk) {
         Life.note(this, "准备安装 " + apk.getName() + " " + apk.length() + " B");
         try {

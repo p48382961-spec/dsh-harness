@@ -257,8 +257,15 @@ window.__ModuleLoader__.load({
 								var engineState = (next && next.engine) || {};
 								var progress = engineState.progress || {};
 								setState({ info: next });
+								floatUpdate(
+									"正在更新引擎",
+									(progress.label || "准备中") + " · " + (engineState.current || "?") + " → " + target,
+									typeof progress.pct === "number" ? progress.pct : 5,
+									progress.stage === "error" ? "error" : progress.done ? "done" : "running"
+								);
 								if (progress.stage === "error") {
 									clearInterval(timer);
+									floatFinish("");
 									setState({
 										phase: "error",
 										note: "更新失败：" + (progress.error || progress.label || "见日志")
@@ -267,6 +274,7 @@ window.__ModuleLoader__.load({
 								}
 								if (!engineState.updating) {
 									clearInterval(timer);
+									floatFinish("引擎已更新到 " + (engineState.current || target));
 									setState({
 										phase: "ready",
 										detail: fill(T.engineReady, { version: engineState.current || target })
@@ -295,6 +303,29 @@ window.__ModuleLoader__.load({
 			var el = document.createElement("style");
 			el.id = STYLE_ID;
 			el.textContent = [
+				/* 浮动进度卡片（下载 / 引擎更新共用） */
+				".dsar-float{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translate(-50%,12px);",
+				"width:min(360px,calc(100vw - 32px));box-sizing:border-box;padding:13px 16px 14px;border-radius:16px;",
+				"background:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#232324) 92%,transparent);",
+				"border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.1));",
+				"box-shadow:0 12px 32px rgba(0,0,0,.24),0 2px 6px rgba(0,0,0,.12);",
+				"backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);",
+				"opacity:0;pointer-events:none;transition:opacity 180ms ease,transform 220ms cubic-bezier(.2,.8,.2,1);z-index:2147483000}",
+				".dsar-float.is-on{opacity:1;transform:translate(-50%,0)}",
+				".dsar-float-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}",
+				".dsar-float-title{font-size:13px;font-weight:600;letter-spacing:.01em;color:var(--dsw-alias-label-primary,#f9fafb)}",
+				".dsar-float-pct{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dsw-alias-label-secondary,#9aa1ab);font-variant-numeric:tabular-nums}",
+				".dsar-float-sub{margin-top:3px;font-size:11.5px;color:var(--dsw-alias-label-tertiary,#8b929c)}",
+				".dsar-float-bar{position:relative;margin-top:9px;height:6px;border-radius:999px;overflow:hidden;",
+				"background:color-mix(in srgb,var(--dsw-alias-label-primary,#fff) 12%,transparent)}",
+				".dsar-float-bar i{display:block;height:100%;width:0;border-radius:999px;",
+				"background:linear-gradient(90deg,#5b8cff,#7aa2ff 55%,#9dbbff);",
+				"transition:width 180ms linear}",
+				".dsar-float:not(.is-done):not(.is-error).is-on .dsar-float-bar i::after{content:'';position:absolute;inset:0;",
+				"background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);animation:dsar-shimmer 1.4s infinite}",
+				"@keyframes dsar-shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}",
+				".dsar-float.is-done .dsar-float-bar i{background:linear-gradient(90deg,#37b26b,#5ed08c)}",
+				".dsar-float.is-error .dsar-float-bar i{background:linear-gradient(90deg,#e5544b,#f08278)}",
 				/* 顶部「应用」按钮 */
 				".dsar-app{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border:0;border-radius:6px;",
 				"background:transparent;color:var(--dsw-alias-label-secondary,#5b6068);font-size:14px;line-height:1;cursor:pointer;",
@@ -500,6 +531,63 @@ window.__ModuleLoader__.load({
 				"\u00d7"
 			);
 		}
+
+		/* ── 浮动进度卡片 ────────────────────────────────────────────────
+		   以前外壳下载是「每 4 MB 弹一个 toast」，又吵又看不出总进度。
+		   现在 Java 侧把下载进度经 window.__dshDl(...) 推过来，这里画一张
+		   圆角卡片：标题 + 百分比 + 细进度条 + 已下载/总量，完成或失败后淡出。 */
+		var floatBox = null;
+		var floatTimer = 0;
+
+		function ensureFloat() {
+			if (floatBox && document.body.contains(floatBox)) return floatBox;
+			floatBox = document.createElement("div");
+			floatBox.className = "dsar-float";
+			floatBox.innerHTML =
+				'<div class="dsar-float-head"><span class="dsar-float-title"></span>' +
+				'<span class="dsar-float-pct"></span></div>' +
+				'<div class="dsar-float-sub"></div>' +
+				'<div class="dsar-float-bar"><i></i></div>';
+			document.body.appendChild(floatBox);
+			return floatBox;
+		}
+
+		function floatUpdate(title, sub, pct, phase) {
+			var box = ensureFloat();
+			var p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+			box.querySelector(".dsar-float-title").textContent = title;
+			box.querySelector(".dsar-float-pct").textContent = p + "%";
+			box.querySelector(".dsar-float-sub").textContent = sub || "";
+			var fill = box.querySelector(".dsar-float-bar i");
+			fill.style.width = p + "%";
+			box.classList.toggle("is-error", phase === "error");
+			box.classList.toggle("is-done", phase === "done");
+			box.classList.add("is-on");
+			clearTimeout(floatTimer);
+			if (phase === "done" || phase === "error") {
+				floatTimer = setTimeout(function () {
+					if (floatBox) floatBox.classList.remove("is-on");
+				}, 4000);
+			}
+		}
+
+		function floatFinish(sub) {
+			if (!floatBox) return;
+			if (sub) floatUpdate("已完成", sub, 100, "done");
+			else setTimeout(function () {
+				if (floatBox) floatBox.classList.remove("is-on");
+			}, 1200);
+		}
+
+		/** Java 侧每 ~120ms 推一次：name, done, total, state(start/downloading/downloaded/done/error) */
+		window.__dshDl = function (name, done, total, phase) {
+			var pct = total > 0 ? (done / total) * 100 : 0;
+			var sub = total > 0
+				? (done / 1048576).toFixed(1) + " / " + (total / 1048576).toFixed(1) + " MB"
+				: (done / 1048576).toFixed(1) + " MB";
+			var title = phase === "done" ? "已下载" : name && /\.apk$/i.test(name) ? "正在下载更新包" : "正在下载";
+			floatUpdate(title, sub, pct, phase === "error" ? "error" : phase === "done" ? "done" : "running");
+		};
 
 		/* 升级进度：步骤清单 + 进度条 + 耗时 + 日志尾巴 */
 		var STEPS = [

@@ -73,7 +73,7 @@ mkdir -p "$WORK" "$STAGE"
 # ---------- 1. 下载 ----------
 stage "download" "下载引擎包（约 170 MB）" 10
 log "下载 $TAR_URL"
-node -e '
+ENGINE_STATE="$STATE" ENGINE_TARGET="$VERSION" ENGINE_FROM="$CUR" ENGINE_STARTED="$STARTED" node -e '
 const fs=require("fs");
 const {Readable,Transform}=require("stream");
 const {pipeline}=require("stream/promises");
@@ -85,7 +85,9 @@ const [url,out]=process.argv.slice(1);
   let got=0,lastPct=-1;
   const meter=new Transform({transform(chunk,_enc,cb){
     got+=chunk.length;
-    if(total>0){const pct=Math.floor(got/total*100); if(pct>=lastPct+5){lastPct=pct; console.log(`  下载 ${pct}%（${(got/1048576).toFixed(0)}/${(total/1048576).toFixed(0)} MB）`);}}
+    if(total>0){const pct=Math.floor(got/total*100); if(pct>=lastPct+2){lastPct=pct; console.log(`  下载 ${pct}%（${(got/1048576).toFixed(0)}/${(total/1048576).toFixed(0)} MB）`);
+      // 把真实下载进度写进状态文件：面板与浮动卡片的进度条据此实时走动（10% → 30% 这一段）
+      try{fs.writeFileSync(process.env.ENGINE_STATE, JSON.stringify({stage:"download",label:`下载引擎包 ${pct}%（${(got/1048576).toFixed(0)}/${(total/1048576).toFixed(0)} MB）`,pct:10+Math.round(pct*0.2),target:process.env.ENGINE_TARGET,from:process.env.ENGINE_FROM,to:process.env.ENGINE_TARGET,startedAt:Number(process.env.ENGINE_STARTED),updatedAt:Math.floor(Date.now()/1000),done:false,error:null})+"\n");}catch(e){}}
     cb(null,chunk);
   }});
   // 用 pipeline 把 web 流直接导进文件：手写 write/drain 会触发 undici 的 paused 断言
