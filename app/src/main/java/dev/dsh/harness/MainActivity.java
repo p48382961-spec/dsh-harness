@@ -36,6 +36,9 @@ public class MainActivity extends Activity {
     private FrameLayout host;
     private TextView status;
     private volatile boolean loaded;
+    /** 页面自愈：失败页/黑屏时后台盯着引擎，一旦健康就自动重载。 */
+    private volatile boolean healing;
+    private int healRounds;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -194,6 +197,9 @@ public class MainActivity extends Activity {
                 ui.postDelayed(() -> {
                     if (status != null) status.setVisibility(android.view.View.GONE);
                 }, 1500);
+                // 页面可能"只画出品牌 logo 就停住"（客户端 bundle 报错 / 引擎刚换过连接），
+                // 旧版本只能靠用户划掉重开。这里 15 秒后自检一次：正文几乎是空的就自己重载。
+                ui.postDelayed(() -> checkPageAlive(w, url, 0), 15000);
             });
         } catch (Throwable e) {
             Log.e(TAG, "boot 失败", e);
@@ -216,6 +222,7 @@ public class MainActivity extends Activity {
         note(why + "\n启动日志" + (ok ? "已回传：logs/" + name : "回传失败（下载服务没开？）")
                 + "\n最后输出：\n" + String.join("\n", tail));
         showFailurePage(why, ok ? name : null, tail);
+        startHeal();
     }
 
     /**
@@ -253,6 +260,71 @@ public class MainActivity extends Activity {
                     + "</div></body>";
             w.loadDataWithBaseURL("http://127.0.0.1/", html, "text/html", "utf-8", null);
         });
+    }
+
+    /**
+     * 页面自检：正常情况下 1 秒内 WebView 就有正文；如果 15 秒后正文几乎为空，
+     * 说明客户端脚本没起来（表现就是一块黑底 + 一只鲸鱼）。这里最多重载 3 次。
+     */
+    private void checkPageAlive(final WebView w, final String url, final int round) {
+        if (w == null || round >= 3 || !loaded) return;
+        try {
+            w.evaluateJavascript("(document.body ? (document.body.innerText||'').trim().length : 0)", value -> {
+                int len;
+                try {
+                    len = Integer.parseInt(value == null ? "0" : value.replaceAll("[^0-9]", ""));
+                } catch (Throwable e) {
+                    len = 0;
+                }
+                if (len < 40) {
+                    Life.note(this, "页面自检：正文只有 " + len + " 字，第 " + (round + 1) + " 次自动重载");
+                    note("页面没起来，正在自动重试…");
+                    w.loadUrl(url);
+                    ui.postDelayed(() -> checkPageAlive(w, url, round + 1), 12000 + round * 4000);
+                } else {
+                    Life.note(this, "页面自检：正常（正文 " + len + " 字）");
+                }
+            });
+        } catch (Throwable e) {
+            Life.note(this, "页面自检异常：" + e);
+        }
+    }
+
+    /** 失败页上盯着引擎：它要是自己活过来了（看门狗/重启脚本拉起），就把页面换回来。 */
+    private void startHeal() {
+        if (healing) return;
+        healing = true;
+        healRounds = 0;
+        final Runnable[] step = new Runnable[1];
+        step[0] = () -> {
+            if (!healing || healRounds >= 20) {
+                healing = false;
+                return;
+            }
+            healRounds++;
+            new Thread(() -> {
+                boolean up = Engine.isUp();
+                ui.post(() -> {
+                    if (!healing) return;
+                    if (up) {
+                        WebView w = web;
+                        String t = Engine.token();
+                        if (w != null) {
+                            String u = "http://127.0.0.1:" + Engine.port() + "/" + (t != null ? "?token=" + t : "");
+                            Life.note(this, "引擎已恢复，自动回到界面");
+                            note("好了，正在回到界面…");
+                            healing = false;
+                            w.loadUrl(u);
+                            loaded = true;
+                            ui.postDelayed(() -> checkPageAlive(w, u, 0), 15000);
+                            return;
+                        }
+                    }
+                    ui.postDelayed(step[0], 8000);
+                });
+            }, "heal-probe").start();
+        };
+        ui.postDelayed(step[0], 8000);
     }
 
     /** 错误页里的文本要转义，否则日志里的尖括号会把页面吃掉。 */
