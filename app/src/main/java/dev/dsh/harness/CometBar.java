@@ -37,6 +37,9 @@ public class CometBar extends View {
 
     private ValueAnimator anim;
     private final RectF rect = new RectF();
+    /** 缓存的彗星 Shader：只有宽度变化时才重建（原来每帧 new 一个，等于每帧都制造垃圾）。 */
+    private Shader cometShader;
+    private float cometShaderW = -1f;
 
     public CometBar(Context c) {
         this(c, null);
@@ -109,14 +112,22 @@ public class CometBar extends View {
             return;
         }
 
-        // 不确定进度：一颗彗星，宽 42%，从左边外面游进、右边外面游出
+        // 不确定进度：一颗彗星，宽 42%，从左边外面游进、右边外面游出。
+        // Shader 只建一次（宽度不变就复用），每帧只做 canvas 平移 —— 单纯改平移不会重新栅格化。
         float cometW = w * 0.42f;
+        if (cometShader == null || cometShaderW != cometW) {
+            cometShader = new LinearGradient(0, 0, cometW, 0,
+                    new int[]{FROM, MID, BRIGHT, FROM}, new float[]{0f, 0.45f, 0.72f, 1f},
+                    Shader.TileMode.CLAMP);
+            cometShaderW = cometW;
+        }
         float x = -cometW + phase * (w + cometW * 2f);
-        cometPaint.setShader(new LinearGradient(x, 0, x + cometW, 0,
-                new int[]{FROM, MID, BRIGHT, FROM}, new float[]{0f, 0.45f, 0.72f, 1f},
-                Shader.TileMode.CLAMP));
-        rect.set(x, top, x + cometW, top + barH);
+        cometPaint.setShader(cometShader);
+        int save = canvas.save();
+        canvas.translate(x, 0f);
+        rect.set(0, top, cometW, top + barH);
         canvas.drawRoundRect(rect, radius, radius, cometPaint);
+        canvas.restoreToCount(save);
         cometPaint.setShader(null);
     }
 

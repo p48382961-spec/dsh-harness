@@ -77,7 +77,9 @@ public class Splash extends FrameLayout {
             bar.animate().alpha(1f).setStartDelay(260).setDuration(360).start();
             bar.start();
         }
-        startGlowBreath();
+        // 柔光不做 alpha 呼吸：200dp 的径向渐变每帧改 alpha 都要重新合成一层，
+        // 在低端 GPU 上就是可见的抖。要"活"交给鱼自己的浮动，柔光保持静态。
+        startFrameStats();
     }
 
     /** 官方图标（与桌面图标同一份路径）预栅格化成 Bitmap，避免缩放时重新栅格化矢量。 */
@@ -108,16 +110,47 @@ public class Splash extends FrameLayout {
         breathe.start();
     }
 
-    private ObjectAnimator glowBreath;
+    /** 开屏期间的掉帧统计：拿去和日志对照，别再靠"感觉卡"。 */
+    private int frameCount;
+    private int jankCount;
+    private long frameTotalNs;
+    private long lastFrameNs;
+    private boolean frameStats;
 
-    private void startGlowBreath() {
-        if (glow == null) return;
-        glowBreath = ObjectAnimator.ofFloat(glow, View.ALPHA, 0.55f, 1f);
-        glowBreath.setDuration(3000);
-        glowBreath.setRepeatCount(ValueAnimator.INFINITE);
-        glowBreath.setRepeatMode(ValueAnimator.REVERSE);
-        glowBreath.setInterpolator(new AccelerateDecelerateInterpolator());
-        glowBreath.start();
+    private void startFrameStats() {
+        frameStats = true;
+        lastFrameNs = 0L;
+        android.view.Choreographer.getInstance().postFrameCallback(new android.view.Choreographer.FrameCallback() {
+            @Override
+            public void doFrame(long frameTimeNanos) {
+                if (!frameStats || stopped) return;
+                if (lastFrameNs > 0L) {
+                    long d = frameTimeNanos - lastFrameNs;
+                    frameCount++;
+                    frameTotalNs += d;
+                    if (d > 20_000_000L) jankCount++; // >20ms = 掉了一帧
+                }
+                lastFrameNs = frameTimeNsSafe(frameTimeNanos);
+                android.view.Choreographer.getInstance().postFrameCallback(this);
+            }
+        });
+    }
+
+    private long frameTimeNsSafe(long v) {
+        return v;
+    }
+
+    /** 交接开始时把统计快照打出去（life.log 会随心跳上传，能远程核对）。 */
+    public void logFrameStats() {
+        frameStats = false;
+        if (frameCount <= 0) {
+            dev.dsh.harness.Life.note(getContext(), "开屏帧统计：无数据");
+            return;
+        }
+        long avg = frameTotalNs / frameCount / 1_000_000L;
+        dev.dsh.harness.Life.note(getContext(),
+                "开屏帧统计：fps≈" + Math.round(1000f / Math.max(1L, avg))
+                        + " 平均帧时=" + avg + "ms 掉帧=" + jankCount + "/" + frameCount);
     }
 
     /** 真实进度（0..1）。目前引擎侧只给得到文字，留着以后接数值。 */
@@ -167,8 +200,8 @@ public class Splash extends FrameLayout {
         if (stopped) return;
         if (floatAnim != null) floatAnim.cancel();
         if (breathe != null) breathe.cancel();
-        if (glowBreath != null) glowBreath.cancel();
         fish.setVisibility(View.INVISIBLE);
+        logFrameStats();
 
         // 离场用 M3 的 standard-accelerate（越走越快，像被推走）；
         // 背景揭幕用 emphasized-decelerate（开头快、尾巴长，停下来不突兀）。
@@ -185,8 +218,12 @@ public class Splash extends FrameLayout {
 
         // 柔光跟着"散开"：一边放大一边淡掉，像光被页面吸走
         if (glow != null) {
+            glow.setLayerType(View.LAYER_TYPE_HARDWARE, null);
             glow.animate().scaleX(1.55f).scaleY(1.55f).alpha(0f)
-                    .setStartDelay(40).setDuration(560).setInterpolator(reveal).start();
+                    .setStartDelay(40).setDuration(560).setInterpolator(reveal)
+                    .withEndAction(() -> {
+                        if (glow != null) glow.setLayerType(View.LAYER_TYPE_NONE, null);
+                    }).start();
         }
 
         // 背景是很长的一段交叉淡出（760ms），把页面"揭"出来，而不是一黑变一亮。
@@ -201,6 +238,14 @@ public class Splash extends FrameLayout {
         bgAnim.setStartDelay(60);
         bgAnim.setDuration(760);
         bgAnim.setInterpolator(new android.view.animation.LinearInterpolator());
+        // 渐变背景每帧重画一遍很贵；上硬件层后 alpha 变化只是合成，不再重画渐变
+        bg.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        bgAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator a) {
+                if (bg != null) bg.setLayerType(View.LAYER_TYPE_NONE, null);
+            }
+        });
         bgAnim.start();
     }
 
@@ -222,10 +267,7 @@ public class Splash extends FrameLayout {
     public void stop() {
         stopped = true;
         if (bar != null) bar.stop();
-        if (glowBreath != null) {
-            glowBreath.cancel();
-            glowBreath = null;
-        }
+        frameStats = false;
         if (floatAnim != null) {
             floatAnim.cancel();
             floatAnim = null;

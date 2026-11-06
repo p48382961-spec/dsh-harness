@@ -92,9 +92,9 @@ public class MainActivity extends Activity {
         web.setDownloadListener((url, ua, cd, mime, len) -> startDownload(url, cd, mime));
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        // WebView 一直可见：让它**在开屏下面**就完成第一次绘制。
-        // 之前是交接那一刻才 setVisibility(VISIBLE)，等于把整页首次合成压在动画的第一帧上 —— 那就是那一"卡"。
-        web.setVisibility(android.view.View.VISIBLE);
+        // 开屏期间 WebView 先不可见：它在下面每帧都被合成一次，是开屏动画掉帧的大头。
+        // 页面加载完（onPageFinished）再打开，此时开屏还完全不透明，首绘照样发生在幕布下。
+        web.setVisibility(android.view.View.INVISIBLE);
 
         // 启动屏：冷启动期间（解包 / 起 node / 等 HTTP）不再是一块纯黑
         splash = new Splash(this);
@@ -396,6 +396,11 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 Life.note(MainActivity.this, "页面加载完成 " + url);
+                // 页面已经画好了：这时才让 WebView 可见。开屏仍完全不透明（760ms 的淡出还没开始），
+                // 所以首次合成照旧发生在幕布下；之后再等 520ms 才真正交接。
+                if (v.getVisibility() != android.view.View.VISIBLE) {
+                    v.setVisibility(android.view.View.VISIBLE);
+                }
                 hideSplash(520);
                 injectProbe(v, url);
             }
