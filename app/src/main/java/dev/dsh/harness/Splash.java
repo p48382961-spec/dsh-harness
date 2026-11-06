@@ -36,6 +36,9 @@ public class Splash extends FrameLayout {
         badge = findViewById(R.id.badge);
         statusView = findViewById(R.id.status);
         statusView.setText(status);
+        // 前 400ms 不显示状态文字：早期几步会瞬间连跳，闪一下反而显得廉价
+        statusView.setAlpha(0f);
+        postDelayed(this::revealStatus, 400);
         // 开屏本身淡入，避免"黑屏突然变成界面"
         setAlpha(0f);
         animate().alpha(1f).setDuration(220).start();
@@ -57,6 +60,16 @@ public class Splash extends FrameLayout {
         breathe.setRepeatMode(ValueAnimator.REVERSE);
         breathe.setInterpolator(new AccelerateDecelerateInterpolator());
         breathe.start();
+    }
+
+    private void revealStatus() {
+        TextView v = statusView;
+        if (stopped || v == null || !v.getText().toString().equals(status)) {
+            // 期间已换过文案：直接显示当前文案
+            if (stopped || v == null) return;
+            v.setText(status);
+        }
+        v.animate().alpha(1f).setDuration(200).start();
     }
 
     /** 更新状态文字（"正在解包引擎 64%" 之类）。 */

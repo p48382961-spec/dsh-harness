@@ -65,12 +65,4 @@
             android:progressBackgroundTint="#23272F" />
     </LinearLayout>
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="48dp"
-        android:text="本地引擎 · 首次启动会慢一些"
-        android:textColor="#5B6068"
-        android:textSize="11sp" />
 </FrameLayout>
