@@ -726,33 +726,30 @@ public class MainActivity extends Activity {
         final FrameLayout h = host;
         final WebView w = web;
 
+        // 页面直接可见：**不**对全屏 WebView 做 alpha/translation 动画。
+        // 每一帧改一次 WebView 的 alpha 都要把整页重新合成一遍，是最主要的一处卡顿来源；
+        // 观感上的"淡入"改由开屏分层退场来"揭开"，等价但便宜得多。
         if (w != null) {
+            w.setAlpha(1f);
+            w.setTranslationY(0f);
             w.setVisibility(android.view.View.VISIBLE);
-            w.setAlpha(0f);
-            w.setTranslationY(dp(10));
-            w.animate().alpha(1f).setStartDelay(140).setDuration(240)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-            w.animate().translationY(0f).setStartDelay(140).setDuration(340)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         }
 
-        // 鱼标接力：复制一份同样大小，从开屏位置飞到侧栏顶部品牌位并缩小
+        // 鱼标接力：用预栅格化的 Bitmap（不是矢量图）做飞行层，开硬件层后只走 GPU 合成
         final android.widget.ImageView flyer = new android.widget.ImageView(this);
         boolean flying = false;
-        android.view.View fish = s.findViewById(R.id.fish);
-        if (h != null && fish != null && fish.getWidth() > 0) {
-            int size = fish.getWidth();
-            int[] fpos = new int[2];
-            int[] hpos = new int[2];
-            fish.getLocationInWindow(fpos);
-            h.getLocationInWindow(hpos);
-            float startCx = fpos[0] - hpos[0] + size / 2f;
-            float startCy = fpos[1] - hpos[1] + size / 2f;
+        if (h != null) {
+            float[] geo = s.fishCenter(h); // 必须在 beginHandoff 之前取（之后开屏里的鱼会藏起来）
+            float size = geo[2] > 0 ? geo[2] : dp(88);
+            float startCx = geo[0];
+            float startCy = geo[1];
             float targetCx = dp(28);
             float targetCy = dp(30);
-            flyer.setImageResource(R.drawable.ic_fish);
+            int px = Math.round(size);
+            flyer.setImageBitmap(s.fishBitmap());
             flyer.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(size, size);
+            flyer.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(px, px);
             lp.leftMargin = Math.round(startCx - size / 2f);
             lp.topMargin = Math.round(startCy - size / 2f);
             h.addView(flyer, lp);
@@ -761,16 +758,19 @@ public class MainActivity extends Activity {
                     .translationY(targetCy - startCy)
                     .scaleX(dp(24) / size)
                     .scaleY(dp(24) / size)
-                    .setStartDelay(80)
-                    .setDuration(420)
-                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.05f))
-                    .withEndAction(() -> flyer.animate().alpha(0f).setDuration(120).start())
+                    .setStartDelay(60)
+                    .setDuration(380)
+                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.02f))
+                    .withEndAction(() -> {
+                        flyer.animate().alpha(0f).setDuration(140).start();
+                        flyer.postDelayed(() -> flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null), 200);
+                    })
                     .start();
             flying = true;
         }
 
-        // 开屏背景与文字让位（鱼已经飞出去了）
-        s.animate().alpha(0f).setStartDelay(60).setDuration(220).start();
+        // 开屏分层退场：进度条 → 状态 → 标题 → 背景（细节见 Splash.beginHandoff）
+        s.beginHandoff();
 
         final boolean hasFlyer = flying;
         ui.postDelayed(() -> {
@@ -779,7 +779,7 @@ public class MainActivity extends Activity {
                 if (hasFlyer) h.removeView(flyer);
             }
             s.stop();
-        }, 640);
+        }, 620);
     }
 
     private float dp(float v) {

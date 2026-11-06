@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 启动屏：官方鱼标 + 标题 + 状态 + 原生不确定进度条（原生动画，不掉帧） -->
+<!-- 启动屏：官方鱼标 + 标题 + 状态 + 原生不确定进度条（原生动画，不掉帧）
+     背景单独一层（@id/splashBg），交接时只化掉它，文案与进度条各自错开淡出 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/splashRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/splash_bg"
     android:clickable="true"
     android:focusable="true">
+
+    <View
+        android:id="@+id/splashBg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/splash_bg" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -18,13 +24,13 @@
 
         <FrameLayout
             android:id="@+id/badge"
-            android:layout_width="100dp"
-            android:layout_height="76dp">
+            android:layout_width="96dp"
+            android:layout_height="88dp">
 
             <ImageView
                 android:id="@+id/fish"
-                android:layout_width="96dp"
-                android:layout_height="71dp"
+                android:layout_width="88dp"
+                android:layout_height="88dp"
                 android:layout_gravity="center"
                 android:contentDescription="@null"
                 android:src="@drawable/ic_fish" />
@@ -34,7 +40,7 @@
             android:id="@+id/title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
+            android:layout_marginTop="20dp"
             android:letterSpacing="0.01"
             android:text="DeepSeek Harness"
             android:textColor="#ECEEF1"
