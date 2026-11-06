@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
         web.setDownloadListener((url, ua, cd, mime, len) -> startDownload(url, cd, mime));
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        web.setVisibility(android.view.View.INVISIBLE);
 
         // 启动屏盖在最上层：冷启动期间（解包 / 起 node / 等 HTTP）不再是一块纯黑
         splash = new Splash(this);
@@ -363,7 +364,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 Life.note(MainActivity.this, "页面加载完成 " + url);
-                hideSplash(120);
+                hideSplash(380);
                 injectProbe(v, url);
             }
 
@@ -712,7 +713,9 @@ public class MainActivity extends Activity {
         if (s == null) return;
         ui.postDelayed(() -> {
             if (splash != s) return;
-            s.animate().alpha(0f).setDuration(260).withEndAction(() -> {
+            WebView w = web;
+            if (w != null) w.setVisibility(android.view.View.VISIBLE);
+            s.animate().alpha(0f).setDuration(240).withEndAction(() -> {
                 FrameLayout h = host;
                 if (h != null) h.removeView(s);
                 if (splash == s) splash = null;

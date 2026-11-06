@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动屏：官方鱼标 + 标题 + 状态 + 原生不确定进度条（原生动画，不掉帧） -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/splashRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/splash_bg"
+    android:clickable="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingBottom="24dp">
+
+        <FrameLayout
+            android:id="@+id/badge"
+            android:layout_width="100dp"
+            android:layout_height="76dp">
+
+            <ImageView
+                android:id="@+id/fish"
+                android:layout_width="96dp"
+                android:layout_height="71dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_fish" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:letterSpacing="0.01"
+            android:text="DeepSeek Harness"
+            android:textColor="#ECEEF1"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:maxWidth="300dp"
+            android:paddingLeft="24dp"
+            android:paddingRight="24dp"
+            android:text="正在启动…"
+            android:textColor="#8B929C"
+            android:textSize="13sp" />
+
+        <ProgressBar
+            android:id="@+id/bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="168dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:indeterminate="true"
+            android:indeterminateTint="#7AA2FF"
+            android:progressBackgroundTint="#23272F" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="48dp"
+        android:text="本地引擎 · 首次启动会慢一些"
+        android:textColor="#5B6068"
+        android:textSize="11sp" />
+</FrameLayout>
