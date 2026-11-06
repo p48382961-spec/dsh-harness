@@ -753,33 +753,61 @@ public class MainActivity extends Activity {
             lp.leftMargin = Math.round(startCx - size / 2f);
             lp.topMargin = Math.round(startCy - size / 2f);
             h.addView(flyer, lp);
-            flyer.animate()
-                    .translationX(targetCx - startCx)
-                    .translationY(targetCy - startCy)
-                    .scaleX(dp(24) / size)
-                    .scaleY(dp(24) / size)
-                    .setStartDelay(60)
-                    .setDuration(380)
-                    .setInterpolator(new android.view.animation.OvershootInterpolator(1.02f))
-                    .withEndAction(() -> {
-                        flyer.animate().alpha(0f).setDuration(140).start();
-                        flyer.postDelayed(() -> flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null), 200);
-                    })
-                    .start();
+
+            // 位移和缩小分开做定时：位移慢（680ms，强减速收尾），缩小更快一点（460ms），
+            // 看起来像"先飘过去、路上顺带变小"，比一起匀速收拢更像有重量的东西。
+            // 之前 380ms + Overshoot 太快，视觉上像被"啪"一下吸过去。
+            float dx = targetCx - startCx;
+            float dy = targetCy - startCy;
+            float endScale = dp(24) / size;
+            android.animation.ObjectAnimator tx =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.TRANSLATION_X, dx);
+            android.animation.ObjectAnimator ty =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.TRANSLATION_Y, dy);
+            android.animation.ObjectAnimator sx =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_X, endScale);
+            android.animation.ObjectAnimator sy =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_Y, endScale);
+            android.view.animation.DecelerateInterpolator glide =
+                    new android.view.animation.DecelerateInterpolator(1.7f);
+            android.view.animation.DecelerateInterpolator shrink =
+                    new android.view.animation.DecelerateInterpolator(1.3f);
+            tx.setInterpolator(glide);
+            ty.setInterpolator(glide);
+            tx.setDuration(680);
+            ty.setDuration(680);
+            sx.setInterpolator(shrink);
+            sy.setInterpolator(shrink);
+            sx.setDuration(460);
+            sy.setDuration(460);
+            sx.setStartDelay(110);
+            sy.setStartDelay(110);
+
+            android.animation.AnimatorSet set = new android.animation.AnimatorSet();
+            set.playTogether(tx, ty, sx, sy);
+            set.setStartDelay(40);
+            set.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    flyer.animate().alpha(0f).setDuration(180).start();
+                    flyer.postDelayed(() -> {
+                        flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+                        if (h != null) h.removeView(flyer);
+                    }, 220);
+                }
+            });
+            set.start();
             flying = true;
         }
 
         // 开屏分层退场：进度条 → 状态 → 标题 → 背景（细节见 Splash.beginHandoff）
         s.beginHandoff();
 
-        final boolean hasFlyer = flying;
+        // 开屏本身 780ms 后就能撤（各层动画最晚 440ms 结束）；鱼是独立的一层，自己飞完自己清理
         ui.postDelayed(() -> {
-            if (h != null) {
-                h.removeView(s);
-                if (hasFlyer) h.removeView(flyer);
-            }
+            if (h != null) h.removeView(s);
             s.stop();
-        }, 620);
+        }, 780);
     }
 
     private float dp(float v) {
