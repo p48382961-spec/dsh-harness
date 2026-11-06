@@ -148,9 +148,11 @@ if dropped:
     print("  已摘除 " + ", ".join(dropped) + "，剩: " + ", ".join(pkg["dsh"]["profile"]["bundles"]))
 PYDROP
 cp -a "$PROJ/payload/scripts/dsh-update.sh" "$SRC/home/试玩/dsh-update.sh"
+cp -a "$PROJ/payload/scripts/dsh-engine-update.sh" "$SRC/home/试玩/dsh-engine-update.sh"
+cp -a "$PROJ/payload/scripts/dsh-engine-rollback.sh" "$SRC/home/试玩/dsh-engine-rollback.sh"
 cp -a "$PROJ/payload/scripts/dsh-restart.sh" "$SRC/home/dsh-restart.sh"
 cp -a "$PROJ/payload/scripts/patch-payload.mjs" "$SRC/home/试玩/patch-payload.mjs"
-chmod 755 "$SRC/home/试玩/dsh-update.sh" "$SRC/home/dsh-restart.sh"
+chmod 755 "$SRC/home/试玩/dsh-update.sh" "$SRC/home/试玩/dsh-engine-update.sh" "$SRC/home/试玩/dsh-engine-rollback.sh" "$SRC/home/dsh-restart.sh"
 echo "  脚本 → home/试玩/dsh-update.sh、home/dsh-restart.sh、home/试玩/patch-payload.mjs"
 # bundle 登记：profile 的 dsh.profile.bundles 里没有它俩，DSH 就不会加载
 python3 - "$SRC/home/.dsh/profiles/web/package.json" <<'PYJSON'

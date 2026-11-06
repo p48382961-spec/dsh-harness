@@ -68,11 +68,12 @@ window.__ModuleLoader__.load({
 			engineTitle: "引擎（DSH 本体）",
 			engineAvailable: "引擎有新版本 {version}",
 			engineRidesShell: "引擎（官方 DSH 核心）随外壳一起升级：上面的「下载并安装」会把新引擎一并换上。Android 版引擎必须是打过补丁的构建，不能从 npm 单独热更新。",
-			engineDetail: "安装完成后引擎会自动重启，页面自动刷新。",
+			engineUpdateAction: "更新引擎（{version}，约 95 MB）",
+			engineDetail: "官方 DSH 核心。Android 上它必须是打好补丁的预构建包，所以这里给的是我们自己发布的引擎包（下载 → 校验 sha256 → 冒烟 → 原子换目录，失败可回滚），不跑 npm。",
 			engineUpdating: "正在安装新引擎，完成后自动重启…",
 			engineProgressStarting: "正在启动升级脚本…",
 			engineProgressElapsed: "已用时",
-			engineProgressStale: "已经 N 秒没有新进展 —— npm 下大包时正常，超过 5 分钟建议看下面的日志。",
+			engineProgressStale: "已经 N 秒没有新进展 —— 下载大包时正常，超过 5 分钟建议看下面的日志。",
 			engineProgressLog: "最近日志",
 			engineProgressDone: "升级完成，正在重启引擎…",
 			engineReady: "引擎已更新到 {version}",
@@ -503,10 +504,11 @@ window.__ModuleLoader__.load({
 		/* 升级进度：步骤清单 + 进度条 + 耗时 + 日志尾巴 */
 		var STEPS = [
 			["prepare", "检查环境"],
-			["backup", "备份旧引擎"],
-			["install", "安装新版本"],
-			["patch", "重打载荷补丁"],
-			["prune", "清理旧备份"],
+			["download", "下载引擎包"],
+			["verify", "校验 sha256"],
+			["extract", "解包"],
+			["smoke", "冒烟测试新引擎"],
+			["swap", "切换目录（旧版保留）"],
 			["restart", "重启引擎"],
 			["done", "完成"]
 		];
@@ -769,11 +771,20 @@ window.__ModuleLoader__.load({
 						)
 					);
 				}
-				if (engine.updateAvailable && !app.updateAvailable) {
-					// 引擎不能单独热更新：Android 上跑的引擎必须是打过补丁的构建，
-					// 只能随外壳（载荷）一起换。这里只解释，不给按钮。
-					blocks.push(
-						h("p", { key: "engine-note", className: "dsar-block-note" }, T.engineRidesShell)
+				if (engine.updateAvailable) {
+					// 引擎走「打好补丁的预构建包」：下载 → 校验 → 冒烟 → 原子换目录，失败可回滚
+					actions.push(
+						h(
+							"button",
+							{
+								key: "engine",
+								className: "dsar-btn dsar-btn-dim",
+								type: "button",
+								disabled: engine.updating,
+								onClick: startEngineUpdate
+							},
+							fill(T.engineUpdateAction, { version: engine.latest || "" })
+						)
 					);
 				}
 				actions.push(
@@ -832,7 +843,7 @@ window.__ModuleLoader__.load({
 				techLines.push("外壳 " + (app.current || "?") + (app.latest ? " → v" + app.latest : "") + (app.pageUrl ? "\n" + app.pageUrl : ""));
 			}
 			if (engine.current || engine.latest) {
-				techLines.push("引擎 " + (engine.current || "?") + (engine.latest ? " / npm " + engine.latest : ""));
+				techLines.push("引擎 " + (engine.current || "?") + (engine.latest ? " / 引擎包 " + engine.latest : ""));
 			}
 			if (app.payload) techLines.push("载荷标记 " + app.payload);
 			if (app.error) techLines.push("外壳检查错误 " + app.error);

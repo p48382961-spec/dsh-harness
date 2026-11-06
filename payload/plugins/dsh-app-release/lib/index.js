@@ -223,18 +223,57 @@ async function checkApp(config) {
 }
 
 /** 引擎：npm registry 的 latest 标签。 */
-async function checkEngine(config) {
-  const response = await fetch(NPM_LATEST, {
-    headers: { accept: "application/json", "user-agent": "dsh-harness-android" },
+/** 引擎包的版本只看我们自己发布过的包：npm 上有新版 ≠ 我们已打出带补丁的包。 */
+const ENGINE_TAG_RE = /engine-v([0-9A-Za-z][0-9A-Za-z.+-]*)/;
+
+async function checkEngineViaApi(config) {
+  const response = await fetch(`https://api.github.com/repos/${ENGINE_REPO}/releases?per_page=30`, {
+    headers: { accept: "application/vnd.github+json", "user-agent": "dsh-harness-android" },
     signal: AbortSignal.timeout(config.timeoutMs)
   });
-  if (!response.ok) throw new Error(`npm registry 返回 ${response.status}`);
-  const meta = await response.json();
-  return {
-    latest: meta.version ?? null,
-    publishedAt: meta.time ?? null,
-    pageUrl: `https://www.npmjs.com/package/${DSH_PACKAGE}`
-  };
+  if (!response.ok) throw new Error(`GitHub 返回 ${response.status}`);
+  const list = await response.json();
+  const found = [];
+  for (const rel of Array.isArray(list) ? list : []) {
+    if (rel.draft) continue;
+    const m = ENGINE_TAG_RE.exec(String(rel.tag_name ?? ""));
+    if (m) found.push({ version: m[1], pageUrl: rel.html_url ?? null, publishedAt: rel.published_at ?? null, via: "api" });
+  }
+  if (!found.length) throw new Error("还没有发布过任何引擎包");
+  found.sort((a, b) => compareVersions(b.version, a.version));
+  return found[0];
+}
+
+async function checkEngineViaAtom(config) {
+  const response = await fetch(`https://github.com/${ENGINE_REPO}/releases.atom`, {
+    headers: { "user-agent": "dsh-harness-android" },
+    signal: AbortSignal.timeout(config.timeoutMs)
+  });
+  if (!response.ok) throw new Error(`GitHub 返回 ${response.status}`);
+  const xml = await response.text();
+  const found = [];
+  for (const entry of xml.split("<entry>").slice(1)) {
+    const m = ENGINE_TAG_RE.exec(entry);
+    if (m) {
+      const link = /<link[^>]+href="([^"]+)"/.exec(entry);
+      found.push({ version: m[1], pageUrl: link ? link[1] : null, publishedAt: null, via: "atom" });
+    }
+  }
+  if (!found.length) throw new Error("还没有发布过任何引擎包");
+  found.sort((a, b) => compareVersions(b.version, a.version));
+  return found[0];
+}
+
+async function checkEngine(config) {
+  try {
+    return await checkEngineViaApi(config);
+  } catch (apiError) {
+    try {
+      return await checkEngineViaAtom(config);
+    } catch (atomError) {
+      throw new Error(`${apiError.message}；atom 兜底也失败：${atomError.message}`);
+    }
+  }
 }
 
 function updatingFlag() {
@@ -334,6 +373,9 @@ async function buildStatus(config, { network }) {
     log: join(homedir(), "试玩", UPDATE_LOG)
   };
 
+  // 引擎包来源：GitHub 直连还是自建镜像（自测时指向本机 8099）
+  engine.source = engineSourceBase() ? "mirror" : "github";
+
   // 进度：只要脚本写过状态就带上（不管更新是否已结束），面板据此显示第几步/百分比/耗时
   const progress = readUpdateState();
   if (progress) {
@@ -375,6 +417,7 @@ async function buildStatus(config, { network }) {
       checked: true,
       latest,
       updateAvailable: Boolean(local.engine && latest) && compareVersions(latest, local.engine) > 0,
+      bundleOnly: true,
       pageUrl
     });
   } else {
@@ -414,14 +457,43 @@ function summarizeEngine(engine) {
 }
 
 /** 触发 `~/试玩/dsh-update.sh <版本>`：备份 → npm install -g → 重打补丁 → 重启引擎。 */
+/** 引擎包来源：GitHub 的 engine-v<版本> release；可在 ~/试玩/.dsh-engine-source 里覆盖成本地/镜像地址。 */
+const ENGINE_REPO = "p48382961-spec/dsh-harness";
+const ENGINE_SOURCE_FILE = "dsh-engine-source";
+
+function engineSourceBase() {
+  try {
+    const raw = readFileSync(join(homedir(), "试玩", ENGINE_SOURCE_FILE), "utf8").trim();
+    const first = raw.split("\n")[0].trim().replace(/\/+$/, "");
+    if (/^https?:\/\//.test(first)) return first;
+  } catch {
+    /* 没配置就走默认 */
+  }
+  return "";
+}
+
+function engineAssetName(version) {
+  return `dsh-engine-${version}-android-arm64.tar.gz`;
+}
+
+/** 引擎包的下载地址与校验文件地址。 */
+function engineUrls(version) {
+  const asset = engineAssetName(version);
+  const base = engineSourceBase();
+  const url = base
+    ? `${base}/${asset}`
+    : `https://github.com/${ENGINE_REPO}/releases/download/engine-v${version}/${asset}`;
+  return { asset, url, shaUrl: `${url}.sha256`, via: base ? "mirror" : "github" };
+}
+
 function startEngineUpdate(config, version) {
   const target = String(version ?? "").trim();
   if (!/^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(target)) {
     throw new Error(`版本号不合法：${target}`);
   }
-  const script = join(homedir(), "试玩", "dsh-update.sh");
+  const script = join(homedir(), "试玩", "dsh-engine-update.sh");
   if (!existsSync(script)) {
-    throw new Error(`找不到升级脚本 ${script}`);
+    throw new Error(`找不到引擎更新脚本 ${script}`);
   }
   if (updatingNow()) {
     throw new Error("已经有一次引擎更新在进行中");
@@ -439,14 +511,15 @@ function startEngineUpdate(config, version) {
   } catch {
     /* 标记文件写不进去不影响更新本身 */
   }
-  const child = spawn(shell, [script, target], {
+  const urls = engineUrls(target);
+  const child = spawn(shell, [script, target, urls.url, urls.shaUrl], {
     detached: true,
     stdio: ["ignore", fd, fd],
     env: { ...process.env, HOME: homedir(), TMPDIR: join(homedir(), "tmp") },
     cwd: homedir()
   });
   child.unref();
-  return { target, script, logPath, pid: child.pid ?? null };
+  return { target, script, logPath, url: urls.url, via: urls.via, pid: child.pid ?? null };
 }
 
 function versionTool(config) {
