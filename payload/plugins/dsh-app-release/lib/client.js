@@ -295,6 +295,14 @@ window.__ModuleLoader__.load({
 			var el = document.createElement("style");
 			el.id = STYLE_ID;
 			el.textContent = [
+				/* 版本摘要行 */
+				".dsar-verline{display:flex;align-items:center;gap:9px;margin-top:4px;font-size:13px;",
+				"color:var(--dsw-alias-label-secondary,#5b6068);font-variant-numeric:tabular-nums}",
+				".dsar-sep{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.35}",
+				".dsar-note{margin:8px 0 0;font-size:12.5px;line-height:1.6;color:var(--dsw-alias-label-tertiary,#8b929c);",
+				"white-space:pre-wrap;word-break:break-word}",
+				".dsar-card.is-ok .dsar-title{color:#2f9e5f}",
+				".dsar-card.is-err .dsar-title{color:#e0564d}",
 				/* 下载进度（面板内） */
 				".dsar-dl{margin:14px 0 2px;padding:12px 14px 13px;border-radius:14px;",
 				"background:var(--dsw-alias-bg-layer-2,rgba(127,127,127,.08));",
@@ -475,7 +483,18 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ *
 		 * 浮层：菜单 + 对话框
 		 * ------------------------------------------------------------------ */
+		/** 菜单里那条更新项的文案：别在"已经最新"时还写"检查更新" */
+		function menuUpdateLabel(info) {
+			var app = (info && info.app) || {};
+			var engine = (info && info.engine) || {};
+			if (engine.updating) return "正在更新引擎…";
+			if (app.updateAvailable || engine.updateAvailable) return "有新版本可用";
+			if (app.checked || engine.checked) return "已是最新版本";
+			return "检查更新…";
+		}
+
 		function MenuLayer(props) {
+			var store = useStore();
 			var rect = props.rect;
 			var top = rect.bottom + 6;
 			var maxTop = window.innerHeight - 140;
@@ -507,7 +526,7 @@ window.__ModuleLoader__.load({
 							openView("update");
 						}
 					},
-					T.checkUpdatesMenu
+					menuUpdateLabel(store)
 				)
 			);
 		}
@@ -563,6 +582,56 @@ window.__ModuleLoader__.load({
 				),
 				h("div", { className: "dsar-dl-bar" }, h("i", { style: { width: pct + "%" } })),
 				h("div", { className: "dsar-dl-sub" }, sub + (dl.name ? "  ·  " + dl.name : ""))
+			);
+		}
+
+		/* 下载镜像：折叠在一块里，不占面板主视觉 */
+		function MirrorRow(props) {
+			var ref = React.useRef(null);
+			var busy = React.useState(false);
+			return h(
+				"details",
+				{ className: "dsar-details" },
+				h("summary", null, "下载镜像（可选）"),
+				h(
+					"div",
+					{ className: "dsar-row" },
+					h("input", {
+						ref: ref,
+						className: "dsar-input",
+						placeholder: "http://…/dsh-harness-arm64.apk",
+						defaultValue: props.current || ""
+					}),
+					h(
+						"button",
+						{
+							className: "dsar-btn dsar-btn-secondary dsar-btn-small",
+							type: "button",
+							disabled: busy[0],
+							onClick: function () {
+								busy[1](true);
+								saveMirror(ref.current ? ref.current.value : "");
+								setTimeout(function () {
+									busy[1](false);
+								}, 1200);
+							}
+						},
+						T.mirrorSave
+					),
+					h(
+						"button",
+						{
+							className: "dsar-btn dsar-btn-dim dsar-btn-small",
+							type: "button",
+							onClick: function () {
+								if (ref.current) ref.current.value = "";
+								saveMirror("");
+							}
+						},
+						T.mirrorClear
+					)
+				),
+				h("p", { className: "dsar-note" }, props.current ? "当前镜像：" + props.current : "GitHub 直连下不动时，把 APK 直链填这里。")
 			);
 		}
 
@@ -701,66 +770,75 @@ window.__ModuleLoader__.load({
 			var app = info.app || {};
 			var engine = info.engine || {};
 			var phase = store.phase;
-
-			var title = T.updateCheckTitle;
-			var message = null;
 			var blocks = [];
 			var actions = [];
 
-			if (phase === "checking") {
-				message = T.checking;
-			} else if (phase === "latest") {
-				title = T.updateCurrent;
-				message = fill(T.updateCurrentDetail, { version: app.current || "未知" });
-				var latestBits = [];
-				if (app.checked && app.latest) latestBits.push("外壳 v" + app.latest);
-				if (engine.checked && engine.latest) latestBits.push("引擎 " + engine.latest);
-				if (latestBits.length) message += "\n" + latestBits.join(" · ");
-			} else if (phase === "error") {
-				message = store.note || T.updateCheckFailed;
-			} else if (phase === "available") {
-				var heads = [];
-				if (app.updateAvailable && app.latest) heads.push(fill(T.shellAvailable, { version: app.latest }));
-				if (engine.updateAvailable && engine.latest) heads.push(fill(T.engineAvailable, { version: engine.latest }));
-				if (heads.length) title = heads[0];
-				if (heads.length > 1) message = heads.slice(1).join("\n");
-			} else if (phase === "downloading") {
-				title = T.updateDownloading;
-				message = store.detail || T.shellWaiting;
-			} else if (phase === "installing") {
-				title = T.engineUpdating;
-			} else if (phase === "ready") {
-				title = store.detail || T.updateDownloadedTitle;
-				message = T.updateDownloadedDetail;
-			} else {
-				title = T.updateCheckTitle;
-				message = "检查一下有没有新版本。";
-			}
-
-			if (store.dl && (store.dl.phase === "start" || store.dl.phase === "downloading" || store.dl.phase === "downloaded" || store.dl.phase === "done" || store.dl.phase === "error")) {
-				blocks.push(h(DownloadBlock, { key: "dl", dl: store.dl }));
-			}
-
-			if (phase === "installing") {
-				var engineInfo = (store.info && store.info.engine) || {};
-				blocks.push(
-					h(ProgressBlock, {
-						key: "progress",
-						progress: engineInfo.progress || null,
-						logTail: engineInfo.logTail || []
-					})
+			function btn(label, kind, onClick, key) {
+				return h(
+					"button",
+					{
+						key: key || label,
+						className: "dsar-btn dsar-btn-" + kind,
+						type: "button",
+						onClick: onClick
+					},
+					label
 				);
 			}
 
-			if (phase === "available" || phase === "checking") {
+			function recheck() {
+				setState({ phase: "checking", note: null, dl: null });
+				load(true);
+			}
+
+			// 一行版本摘要：外壳 · 引擎（不再单独占两块 + 一堆说明）
+			var versions = h(
+				"div",
+				{ className: "dsar-verline", key: "verline" },
+				h("span", null, "外壳 v" + (app.current || "?")),
+				h("i", { className: "dsar-sep" }),
+				h("span", null, "引擎 " + (engine.current || "?"))
+			);
+
+			var title = "版本与更新";
+			var tone = "";
+			if (phase === "checking") title = "正在检查更新…";
+			else if (phase === "latest") { title = "已是最新版本"; tone = "is-ok"; }
+			else if (phase === "available") title = app.updateAvailable ? "发现新版本" : "发现引擎更新";
+			else if (phase === "downloading") title = "正在下载更新包";
+			else if (phase === "installing") title = "正在更新引擎";
+			else if (phase === "ready") { title = "更新完成"; tone = "is-ok"; }
+			else if (phase === "error") { title = "更新失败"; tone = "is-err"; }
+
+			/* ── 主体：每种状态只放该有的东西 ─────────────────────────── */
+			if (phase === "latest") {
+				blocks.push(versions);
+				var checkedAt = new Date();
+				blocks.push(
+					h(
+						"p",
+						{ className: "dsar-note", key: "when" },
+						"刚刚检查于 " + String(checkedAt.getHours()).padStart(2, "0") + ":" + String(checkedAt.getMinutes()).padStart(2, "0")
+					)
+				);
+				actions.push(btn("重新检查", "secondary", recheck, "re"));
+				actions.push(btn(T.close, "dim", closeView, "close"));
+			} else if (phase === "available") {
 				if (app.updateAvailable) {
 					blocks.push(
 						h(
 							"div",
 							{ className: "dsar-block", key: "shell" },
-							h("p", { className: "dsar-block-title" }, T.shellTitle),
-							h(VersionRow, { label: "当前", from: app.current, to: "v" + app.latest }),
-							h("p", { className: "dsar-block-note" }, app.mirror ? T.mirrorDetail : T.updateDetail)
+							h("p", { className: "dsar-block-title" }, "外壳"),
+							h(VersionRow, { label: "", from: "v" + (app.current || "?"), to: "v" + app.latest })
+						)
+					);
+					actions.push(
+						btn(
+							"下载并安装" + (app.apkSize ? "（" + mb(app.apkSize) + "）" : ""),
+							"primary",
+							startAppDownload,
+							"app"
 						)
 					);
 				}
@@ -769,174 +847,93 @@ window.__ModuleLoader__.load({
 						h(
 							"div",
 							{ className: "dsar-block", key: "engine" },
-							h("p", { className: "dsar-block-title" }, T.engineTitle),
-							h(VersionRow, { label: "当前", from: engine.current, to: engine.latest }),
-							h("p", { className: "dsar-block-note" }, T.engineDetail)
+							h("p", { className: "dsar-block-title" }, "引擎"),
+							h(VersionRow, { label: "", from: engine.current || "?", to: engine.latest })
+						)
+					);
+					actions.push(
+						btn(
+							"更新引擎" + (engine.latest ? "（" + engine.latest + "）" : ""),
+							"dim",
+							startEngineUpdate,
+							"engine"
 						)
 					);
 				}
-			}
-
-			if (phase === "available" || phase === "checking" || phase === "latest") {
-				var mirrorInput = h("input", {
-					key: "mirror-input",
-					className: "dsar-input",
-					type: "text",
-					value: app.mirror || "",
-					placeholder: T.mirrorPlaceholder,
-					spellcheck: false
-				});
+				actions.push(btn("稍后", "dim", closeView, "later"));
+			} else if (phase === "downloading" || (store.dl && store.dl.phase !== "error")) {
+				if (store.dl) blocks.push(h(DownloadBlock, { key: "dl", dl: store.dl }));
+				blocks.push(h("p", { className: "dsar-note", key: "hint" }, "下载完成后会自动打开系统安装器。"));
+				actions.push(btn("后台继续", "dim", closeView, "bg"));
+			} else if (phase === "installing") {
+				var engineInfo = (store.info && store.info.engine) || {};
+				blocks.push(
+					h(ProgressBlock, {
+						key: "progress",
+						progress: engineInfo.progress || null,
+						logTail: engineInfo.logTail || []
+					})
+				);
+				actions.push(btn("后台继续", "dim", closeView, "bg"));
+			} else if (phase === "checking") {
 				blocks.push(
 					h(
-						"div",
-						{ className: "dsar-block", key: "mirror" },
-						h("p", { className: "dsar-block-title" }, T.mirrorTitle),
-						mirrorInput,
-						h(
-							"div",
-							{ className: "dsar-row" },
-							h(
-								"button",
-								{
-									key: "mirror-save",
-									className: "dsar-btn dsar-btn-secondary dsar-btn-small",
-									type: "button",
-									onClick: function () {
-										saveMirror(mirrorInput.value);
-									}
-								},
-								T.mirrorSave
-							),
-							h(
-								"button",
-								{
-									key: "mirror-clear",
-									className: "dsar-btn dsar-btn-secondary dsar-btn-small",
-									type: "button",
-									onClick: function () {
-										saveMirror("");
-									}
-								},
-								T.mirrorClear
-							)
-						),
-						h("p", { className: "dsar-block-note" }, T.mirrorHint)
+						"p",
+						{ className: "dsar-note", key: "checking" },
+						"正在向 GitHub 与 npm 查询最新版本…"
 					)
 				);
-				if (app.degraded) {
-					blocks.push(
-						h("p", { className: "dsar-block-note", key: "degraded" }, T.apiFallback)
-					);
-				}
-			}
-
-			if (phase === "available") {
-				if (app.updateAvailable) {
-					actions.push(
-						h(
-							"button",
-							{ key: "app", className: "dsar-btn dsar-btn-primary", type: "button", onClick: startAppDownload },
-							T.updateDownload + (app.apkSize ? "（" + mb(app.apkSize) + "）" : "")
-						)
-					);
-				}
-				if (engine.updateAvailable) {
-					// 引擎走「打好补丁的预构建包」：下载 → 校验 → 冒烟 → 原子换目录，失败可回滚
-					actions.push(
-						h(
-							"button",
-							{
-								key: "engine",
-								className: "dsar-btn dsar-btn-dim",
-								type: "button",
-								disabled: engine.updating,
-								onClick: startEngineUpdate
-							},
-							fill(T.engineUpdateAction, { version: engine.latest || "" })
-						)
-					);
-				}
-				actions.push(
-					h("button", { key: "later", className: "dsar-btn dsar-btn-dim", type: "button", onClick: closeView }, T.later)
-				);
-			} else if (phase === "error") {
-				actions.push(
-					h(
-						"button",
-						{
-							key: "retry",
-							className: "dsar-btn dsar-btn-primary",
-							type: "button",
-							onClick: function () {
-								setState({ phase: "checking", note: null });
-								load(true);
-							}
-						},
-						T.updateRetry
-					),
-					h("button", { key: "later", className: "dsar-btn dsar-btn-dim", type: "button", onClick: closeView }, T.later)
-				);
-			} else if (phase === "downloading" || phase === "installing") {
-				actions.push(
-					h("button", { key: "later", className: "dsar-btn dsar-btn-dim", type: "button", onClick: closeView }, "后台继续")
-				);
+				actions.push(btn("关闭", "dim", closeView, "close"));
 			} else if (phase === "ready") {
-				actions.push(
-					h("button", { key: "ok", className: "dsar-btn dsar-btn-primary", type: "button", onClick: closeView }, T.confirm)
+				blocks.push(versions);
+				actions.push(btn(T.confirm, "primary", closeView, "ok"));
+			} else if (phase === "error") {
+				blocks.push(
+					h("p", { className: "dsar-note", key: "err" }, store.note || T.updateCheckFailed)
 				);
-			} else if (phase === "checking") {
-				actions.push(
-					h("button", { key: "later", className: "dsar-btn dsar-btn-dim", type: "button", onClick: closeView }, T.later)
-				);
+				actions.push(btn("重试", "primary", recheck, "retry"));
+				actions.push(btn(T.close, "dim", closeView, "close"));
 			} else {
-				actions.push(
-					h(
-						"button",
-						{
-							key: "check",
-							className: "dsar-btn dsar-btn-primary",
-							type: "button",
-							onClick: function () {
-								setState({ phase: "checking" });
-								load(true);
-							}
-						},
-						T.checkUpdatesMenu
-					),
-					h("button", { key: "later", className: "dsar-btn dsar-btn-dim", type: "button", onClick: closeView }, T.later)
-				);
+				blocks.push(versions);
+				actions.push(btn("检查更新", "primary", recheck, "check"));
+				actions.push(btn(T.close, "dim", closeView, "close"));
 			}
 
-			var techLines = [];
-			if (app.current || app.latest) {
-				techLines.push("外壳 " + (app.current || "?") + (app.latest ? " → v" + app.latest : "") + (app.pageUrl ? "\n" + app.pageUrl : ""));
-			}
-			if (engine.current || engine.latest) {
-				techLines.push("引擎 " + (engine.current || "?") + (engine.latest ? " / 引擎包 " + engine.latest : ""));
-			}
-			if (app.payload) techLines.push("载荷标记 " + app.payload);
-			if (app.error) techLines.push("外壳检查错误 " + app.error);
-			if (engine.error) techLines.push("引擎检查错误 " + engine.error);
-			var details = techLines.length
-				? h(
+			// 技术详情只在出错时给，平时不占地方
+			var details = null;
+			if (phase === "error") {
+				var techLines = [];
+				if (app.current || app.latest) techLines.push("外壳 " + (app.current || "?") + (app.latest ? " → v" + app.latest : ""));
+				if (engine.current || engine.latest) techLines.push("引擎 " + (engine.current || "?") + (engine.latest ? " → " + engine.latest : ""));
+				if (app.payload) techLines.push("载荷 " + app.payload);
+				if (app.error) techLines.push("外壳检查错误 " + app.error);
+				if (engine.error) techLines.push("引擎检查错误 " + engine.error);
+				if (techLines.length) {
+					details = h(
 						"details",
 						{ className: "dsar-details" },
 						h("summary", null, T.updateTechnicalDetails),
-						h("pre", { className: "dsar-pre" }, techLines.join("\n\n"))
-				  )
-				: null;
+						h("pre", { className: "dsar-pre" }, techLines.join("\n"))
+					);
+				}
+			}
+
+			var mirror = null;
+			if (phase === "available" && app.updateAvailable) {
+				mirror = h(MirrorRow, { key: "mirror", current: app.mirror || "" });
+			}
 
 			return h(
 				"div",
 				{ className: "dsar-mask", onClick: closeView },
 				h(
 					"div",
-					{ className: "dsar-card", role: "dialog", "aria-modal": "true", onClick: function (e) { e.stopPropagation(); } },
+					{ className: "dsar-card " + tone, role: "dialog", "aria-modal": "true", onClick: function (e) { e.stopPropagation(); } },
 					h(CloseButton),
 					h("h2", { className: "dsar-title" }, title),
-					message ? h("p", { className: "dsar-msg" }, message) : null,
 					blocks,
 					details,
+					mirror,
 					h("div", { className: "dsar-actions" }, actions)
 				)
 			);
