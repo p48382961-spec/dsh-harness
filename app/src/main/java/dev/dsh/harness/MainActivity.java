@@ -36,6 +36,12 @@ public class MainActivity extends Activity {
     private FrameLayout host;
     private Splash splash;
     private TextView status;
+    /** 交接动画用的独立图层：启动时就建好、常驻，交接时只改变换属性 —— 不增删视图、不触发重排。 */
+    private FrameLayout overlay;
+    private android.widget.ImageView flyer;
+    private android.view.View glow;
+    /** 鱼的起始尺寸（dp），overlay 里预先按这个尺寸布局。 */
+    private static final float FISH_DP = 88f;
     private volatile boolean loaded;
     /** 页面自愈：失败页/黑屏时后台盯着引擎，一旦健康就自动重载。 */
     private volatile boolean healing;
@@ -81,11 +87,32 @@ public class MainActivity extends Activity {
         web.setDownloadListener((url, ua, cd, mime, len) -> startDownload(url, cd, mime));
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        web.setVisibility(android.view.View.INVISIBLE);
+        // WebView 一直可见：让它**在开屏下面**就完成第一次绘制。
+        // 之前是交接那一刻才 setVisibility(VISIBLE)，等于把整页首次合成压在动画的第一帧上 —— 那就是那一"卡"。
+        web.setVisibility(android.view.View.VISIBLE);
 
-        // 启动屏盖在最上层：冷启动期间（解包 / 起 node / 等 HTTP）不再是一块纯黑
+        // 启动屏：冷启动期间（解包 / 起 node / 等 HTTP）不再是一块纯黑
         splash = new Splash(this);
         root.addView(splash, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // 交接图层必须在开屏**之上**：鱼一边飞、开屏背景一边化掉，鱼不能被盖在自己家开屏下面。
+        // 预先建好、常驻；交接时只改变换属性（translation/scale/alpha），
+        // 不 addView/removeView、不改 LayoutParams —— 否则动画第一帧会夹一次全量重排。
+        overlay = new FrameLayout(this);
+        overlay.setClickable(false);
+        overlay.setFocusable(false);
+        flyer = new android.widget.ImageView(this);
+        flyer.setVisibility(android.view.View.INVISIBLE);
+        flyer.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        flyer.setImageBitmap(null);
+        overlay.addView(flyer, new FrameLayout.LayoutParams(Math.round(dp(FISH_DP)), Math.round(dp(FISH_DP))));
+        glow = new android.view.View(this);
+        glow.setBackgroundResource(R.drawable.ripple_glow);
+        glow.setAlpha(0f);
+        glow.setVisibility(android.view.View.INVISIBLE);
+        overlay.addView(glow, new FrameLayout.LayoutParams(Math.round(dp(150)), Math.round(dp(150))));
+        root.addView(overlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
@@ -364,7 +391,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 Life.note(MainActivity.this, "页面加载完成 " + url);
-                hideSplash(380);
+                hideSplash(520);
                 injectProbe(v, url);
             }
 
@@ -717,143 +744,148 @@ public class MainActivity extends Activity {
     private void hideSplash(long delay) {
         final Splash s = splash;
         if (s == null) return;
-        ui.postDelayed(() -> playHandoff(s), delay);
+        ui.postDelayed(() -> {
+            WebView w = web;
+            if (w != null) {
+                // 再等两帧：让页面把"首次绘制 + 合成"做完再开交接。
+                // 动画第一帧如果和 WebView 首绘撞在一起，就是肉眼可见的一顿。
+                w.postOnAnimation(() -> s.postOnAnimation(() -> playHandoff(s)));
+            } else {
+                playHandoff(s);
+            }
+        }, delay);
     }
 
     private void playHandoff(final Splash s) {
         if (splash != s) return;
         splash = null; // 防重入
         final FrameLayout h = host;
-        final WebView w = web;
+        final android.widget.ImageView fishView = flyer;
+        final android.view.View glowView = glow;
 
-        // 页面直接可见：**不**对全屏 WebView 做 alpha/translation 动画。
-        // 每一帧改一次 WebView 的 alpha 都要把整页重新合成一遍，是最主要的一处卡顿来源；
-        // 观感上的"淡入"改由开屏分层退场来"揭开"，等价但便宜得多。
-        if (w != null) {
-            w.setAlpha(1f);
-            w.setTranslationY(0f);
-            w.setVisibility(android.view.View.VISIBLE);
-        }
+        // 页面在交接前就已经在开屏下面画好了（WebView 一直是 VISIBLE），
+        // 所以这里**不碰 WebView**：不改 alpha、不改 translation、不改可见性。
+        // 任何一帧对 WebView 的重合成都会掉帧，这里是上一版"卡一下"的根源。
 
-        // 鱼标接力：用预栅格化的 Bitmap（不是矢量图）做飞行层，开硬件层后只走 GPU 合成
-        final android.widget.ImageView flyer = new android.widget.ImageView(this);
         boolean flying = false;
-        if (h != null) {
+        if (h != null && fishView != null && overlay != null) {
             float[] geo = s.fishCenter(h); // 必须在 beginHandoff 之前取（之后开屏里的鱼会藏起来）
-            float size = geo[2] > 0 ? geo[2] : dp(88);
+            float size = geo[2] > 0 ? geo[2] : dp(FISH_DP);
             float startCx = geo[0];
             float startCy = geo[1];
             float targetCx = dp(28);
             float targetCy = dp(30);
-            int px = Math.round(size);
-            flyer.setImageBitmap(s.fishBitmap());
-            flyer.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-            flyer.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(px, px);
-            lp.leftMargin = Math.round(startCx - size / 2f);
-            lp.topMargin = Math.round(startCy - size / 2f);
-            h.addView(flyer, lp);
+            float endScale = dp(24) / size;
 
-            // 飞行 = 二次贝塞尔弧线 + 旋转回正 + 分段缩放，而不是直线平移：
-            // 直线看起来像"被吸走"，弧线才有"自己飞过去"的感觉。
+            // 视图是启动时按 FISH_DP 布局在 overlay 左上角的，这里只算"从布局位置出发要偏移多少"。
+            float laidCx = dp(FISH_DP) / 2f;
+            float laidCy = dp(FISH_DP) / 2f;
+            float baseX = startCx - laidCx;
+            float baseY = startCy - laidCy;
+
+            fishView.setImageBitmap(s.fishBitmap());
+            fishView.setPivotX(dp(FISH_DP) / 2f);
+            fishView.setPivotY(dp(FISH_DP) / 2f);
+            fishView.setTranslationX(baseX);
+            fishView.setTranslationY(baseY);
+            fishView.setScaleX(1f);
+            fishView.setScaleY(1f);
+            fishView.setRotation(0f);
+            fishView.setAlpha(1f);
+            fishView.setVisibility(android.view.View.VISIBLE);
+            fishView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+
+            // 辉光也预先布局在 overlay 里，只用 translation 定位
+            if (glowView != null) {
+                float g = dp(150) / 2f;
+                glowView.setTranslationX(startCx - g);
+                glowView.setTranslationY(startCy - g);
+                glowView.setScaleX(0.45f);
+                glowView.setScaleY(0.45f);
+                glowView.setAlpha(0.8f);
+                glowView.setVisibility(android.view.View.VISIBLE);
+                glowView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+                glowView.animate()
+                        .alpha(0f).scaleX(1.7f).scaleY(1.7f)
+                        .setStartDelay(30).setDuration(620)
+                        .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                        .withEndAction(() -> {
+                            glowView.setVisibility(android.view.View.INVISIBLE);
+                            glowView.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+                        })
+                        .start();
+            }
+
+            // 二次贝塞尔：控制点沿位移法线鼓出 0.18×距离，直线看起来像"被吸走"
             final float dx = targetCx - startCx;
             final float dy = targetCy - startCy;
             float dist = (float) Math.hypot(dx, dy);
             if (dist < 1f) dist = 1f;
-            final float bend = dist * 0.18f;             // 弧度：法线方向鼓出去
+            final float bend = dist * 0.18f;
             final float cxp = startCx + dx / 2f + (-dy / dist) * bend;
             final float cyp = startCy + dy / 2f + (dx / dist) * bend;
-            final float endScale = dp(24) / size;
-
-            // 起步辉光：跟着鱼一起"点一下"，把视线先拉过去
-            final android.view.View glow = new android.view.View(this);
-            glow.setBackgroundResource(R.drawable.ripple_glow);
-            FrameLayout.LayoutParams glp =
-                    new FrameLayout.LayoutParams(Math.round(dp(150)), Math.round(dp(150)));
-            glp.leftMargin = Math.round(startCx - dp(75));
-            glp.topMargin = Math.round(startCy - dp(75));
-            glow.setAlpha(0f);
-            glow.setScaleX(0.45f);
-            glow.setScaleY(0.45f);
-            glow.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
-            h.addView(glow, glp);
-            glow.setAlpha(0.85f);
-            glow.animate().alpha(0f).scaleX(1.7f).scaleY(1.7f)
-                    .setStartDelay(40).setDuration(560)
-                    .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
-                    .start();
-            h.postDelayed(() -> {
-                glow.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
-                h.removeView(glow);
-            }, 700);
 
             // 位移与缩放绑在同一个进度上：位置走多远，鱼就缩多小。
-            // 之前两件事分开定时、而且都用 emphasized-decelerate，结果是前 250ms 就把 80% 走完，
-            // 后半段只剩一个已经缩到很小的点在慢慢爬 —— 看起来就是"没有缩小过程"。
-            // 现在换成缓入缓出的轨迹曲线（起步慢一点、中段匀、落点软），820ms 全程都在缩。
-            final long FLIGHT_MS = 820;
+            // 曲线缓入缓出（不是 emphasized-decelerate 那种前端极快），820ms 全程可见地在缩。
+            final float fStartCx = startCx;
+            final float fStartCy = startCy;
             android.animation.ValueAnimator fly = android.animation.ValueAnimator.ofFloat(0f, 1f);
-            fly.setStartDelay(40);
-            fly.setDuration(FLIGHT_MS);
+            fly.setStartDelay(30);
+            fly.setDuration(820);
             fly.setInterpolator(new android.view.animation.PathInterpolator(0.42f, 0f, 0.18f, 1f));
             fly.addUpdateListener(a -> {
                 float t = (Float) a.getAnimatedValue();
                 float u = 1f - t;
-                float x = u * u * startCx + 2f * u * t * cxp + t * t * targetCx;
-                float y = u * u * startCy + 2f * u * t * cyp + t * t * targetCy;
-                flyer.setTranslationX(x - startCx);
-                flyer.setTranslationY(y - startCy);
-                // 尺寸：从开屏尺寸线性收到侧栏图标尺寸，跟着轨迹走
+                float x = u * u * fStartCx + 2f * u * t * cxp + t * t * targetCx;
+                float y = u * u * fStartCy + 2f * u * t * cyp + t * t * targetCy;
+                fishView.setTranslationX(x - laidCx);
+                fishView.setTranslationY(y - laidCy);
                 float sc = 1f + (endScale - 1f) * t;
-                flyer.setScaleX(sc);
-                flyer.setScaleY(sc);
-                // 姿态：起飞时 -8°，落点前已经回正
-                flyer.setRotation(-8f * (1f - t));
+                fishView.setScaleX(sc);
+                fishView.setScaleY(sc);
+                fishView.setRotation(-8f * (1f - t));
             });
-
             fly.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(android.animation.Animator a) {
-                    // 到位后先轻轻一涨，再缩一点点被"吸进"侧栏，最后淡掉
-                    flyer.animate().scaleX(endScale * 1.08f).scaleY(endScale * 1.08f)
+                    // 落点：先轻轻一涨，再缩一点被"吸进"侧栏，最后淡掉
+                    fishView.animate().scaleX(endScale * 1.08f).scaleY(endScale * 1.08f)
                             .setDuration(90)
                             .setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
-                            .withEndAction(() -> flyer.animate()
+                            .withEndAction(() -> fishView.animate()
                                     .scaleX(endScale * 0.9f).scaleY(endScale * 0.9f).alpha(0f)
                                     .setDuration(180)
                                     .setInterpolator(new android.view.animation.PathInterpolator(0.3f, 0f, 1f, 1f))
                                     .withEndAction(() -> {
-                                        flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
-                                        if (h != null) h.removeView(flyer);
+                                        fishView.setVisibility(android.view.View.INVISIBLE);
+                                        fishView.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
                                     })
                                     .start())
                             .start();
                 }
             });
-
             fly.start();
             flying = true;
-        }
-
-        // 页面从下方 12dp 落到位：只做 translationY（合成层位移，开销远小于 alpha），
-        // 与开屏揭幕同时发生，页面像"被托上来"而不是"啪一下出现"。
-        if (w != null) {
-            w.setTranslationY(dp(12));
-            w.animate().translationY(0f)
-                    .setStartDelay(220)
-                    .setDuration(340)
-                    .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
-                    .start();
         }
 
         // 开屏分层退场：进度条 → 状态 → 标题 → 背景（细节见 Splash.beginHandoff）
         s.beginHandoff();
 
-        // 开屏本身 820ms 后撤（各层动画最晚 520ms 结束）；鱼是独立图层，自己飞完自己清理
+        // 开屏 860ms 后撤；鱼在 overlay 里自己飞完自己藏起来
+        final boolean hasFlyer = flying;
         ui.postDelayed(() -> {
             if (h != null) h.removeView(s);
             s.stop();
-        }, 820);
+            if (hasFlyer) {
+                // 兜底：万一动画被系统掐了，别留一只鱼挂在那儿
+                ui.postDelayed(() -> {
+                    if (fishView != null && fishView.getVisibility() == android.view.View.VISIBLE) {
+                        fishView.setVisibility(android.view.View.INVISIBLE);
+                        fishView.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+                    }
+                }, 900);
+            }
+        }, 860);
     }
 
     private float dp(float v) {

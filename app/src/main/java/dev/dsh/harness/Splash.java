@@ -59,8 +59,9 @@ public class Splash extends FrameLayout {
         statusView.setAlpha(0f);
         postDelayed(this::revealStatus, 400);
 
-        setAlpha(0f);
-        animate().alpha(1f).setDuration(200).start();
+        // 不再做入场淡入：WebView 现在一直在下面准备（交接时不再首次合成），
+        // 开屏本身必须第一帧就完全不透明，否则会透出还没准备好的页面。
+        setAlpha(1f);
         startLogoAnimation();
     }
 
