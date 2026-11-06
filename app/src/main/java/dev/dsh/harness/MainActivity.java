@@ -631,6 +631,68 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * 把 `github.com/<o>/<r>/releases/download/<tag>/<asset>` 解析成**能真正下到字节**的直链。
+     *
+     * 背景：这台设备上 `github.com:443` 时通时不通（2026-11-06 多次 20s 连接超时），
+     * 但 `api.github.com` 与 `objects.githubusercontent.com` 一直可达。所以绕开 github.com：
+     * 先用 API 查 asset id，再请求 /releases/assets/<id> 拿 302 的 Location（签名直链），
+     * 那个域名就是 CDN，直接下。
+     */
+    private String resolveAssetUrl(String url) {
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^https://github\\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?]+)")
+                    .matcher(url);
+            if (!m.find()) return url;
+            String owner = m.group(1), repo = m.group(2), tag = m.group(3), asset = m.group(4);
+            String api = "https://api.github.com/repos/" + owner + "/" + repo + "/releases/tags/" + tag;
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(api).openConnection();
+            c.setConnectTimeout(12000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("Accept", "application/vnd.github+json");
+            c.setRequestProperty("User-Agent", "DSHShell");
+            String body = "";
+            try (java.io.InputStream in = c.getInputStream()) {
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                byte[] b = new byte[8192];
+                int n;
+                while ((n = in.read(b)) > 0) bos.write(b, 0, n);
+                body = bos.toString("UTF-8");
+            }
+            if (c.getResponseCode() != 200) return url;
+            String quoted = java.util.regex.Pattern.quote(asset);
+            java.util.regex.Matcher am = java.util.regex.Pattern
+                    .compile("\"id\\s*:\s*(\\d+)[^}]*?\"name\"\\s*:\\s*\"(" + quoted + ")\"")
+                    .matcher(body);
+            // 上面那条正则依赖字段顺序，不稳；换个更笨但可靠的办法：先按 name 定位，再往前找 id
+            java.util.regex.Matcher nameMatcher = java.util.regex.Pattern
+                    .compile("\\{\\s*\"url\"\\s*:\\s*\"([^\"]+/releases/assets/(\\d+))\"[^}]*?\"name\"\\s*:\\s*\"(" + quoted + ")\"")
+                    .matcher(body);
+            String assetApi = null;
+            while (nameMatcher.find()) {
+                assetApi = nameMatcher.group(1);
+            }
+            if (assetApi == null) return url;
+            java.net.HttpURLConnection a = (java.net.HttpURLConnection) new java.net.URL(assetApi).openConnection();
+            a.setInstanceFollowRedirects(false);
+            a.setConnectTimeout(12000);
+            a.setReadTimeout(20000);
+            a.setRequestProperty("Accept", "application/octet-stream");
+            a.setRequestProperty("User-Agent", "DSHShell");
+            int code = a.getResponseCode();
+            String loc = a.getHeaderField("Location");
+            a.disconnect();
+            if ((code == 302 || code == 301 || code == 307) && loc != null && loc.startsWith("https://")) {
+                Life.note(this, "引擎包直链已解析：" + loc.substring(0, Math.min(80, loc.length())) + "…");
+                return loc;
+            }
+        } catch (Throwable e) {
+            Life.note(this, "解析直链失败（继续用原地址）：" + e);
+        }
+        return url;
+    }
+
+    /**
      * 下载引擎包到 files/updates/。走的是与外层 APK 相同的 HttpURLConnection 链路：
      * 设备网络下 node fetch 到 objects.githubusercontent.com 会超时，而这条一直是通的。
      */
@@ -644,23 +706,39 @@ public class MainActivity extends Activity {
             File part = new File(dir, "engine-" + version + ".part");
             java.net.HttpURLConnection conn = null;
             try {
-                conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-                conn.setConnectTimeout(20000);
-                conn.setReadTimeout(120000);
-                conn.setInstanceFollowRedirects(true);
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) DSHShell");
-                int code = conn.getResponseCode();
-                if (code >= 400) throw new java.io.IOException("HTTP " + code);
+                // github.com 时通时不通：先解析成 objects.githubusercontent.com 的签名直链
+                String direct = resolveAssetUrl(url);
+                Exception last = null;
+                java.io.InputStream in = null;
+                for (String attempt : new String[]{direct, url, direct}) {
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(attempt).openConnection();
+                    c.setConnectTimeout(20000);
+                    c.setReadTimeout(120000);
+                    c.setInstanceFollowRedirects(true);
+                    c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) DSHShell");
+                    try {
+                        int code = c.getResponseCode();
+                        if (code >= 400) throw new java.io.IOException("HTTP " + code);
+                        in = c.getInputStream();
+                        conn = c;
+                        break;
+                    } catch (Exception e) {
+                        last = e;
+                        Life.note(this, "引擎包下载重试：" + e);
+                        c.disconnect();
+                    }
+                }
+                if (in == null) throw last != null ? last : new java.io.IOException("下载失败");
                 final long expect = Math.max(0L, conn.getContentLengthLong());
                 dlProgress(tag, 0, expect, "start");
                 long total = 0;
-                try (java.io.InputStream in = conn.getInputStream();
+                try (java.io.InputStream src = in;
                      java.io.OutputStream os = new java.io.BufferedOutputStream(
                              new java.io.FileOutputStream(part), 256 * 1024)) {
                     byte[] buf = new byte[256 * 1024];
                     long lastTick = 0;
                     int n;
-                    while ((n = in.read(buf)) > 0) {
+                    while ((n = src.read(buf)) > 0) {
                         os.write(buf, 0, n);
                         total += n;
                         long now = android.os.SystemClock.elapsedRealtime();
