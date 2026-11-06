@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 鱼标起步时炸开的一圈辉光：径向渐变到全透明，边缘不出现硬边 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="50%"
+        android:centerX="0.5"
+        android:centerY="0.5"
+        android:startColor="#665B8DEF"
+        android:centerColor="#2E5B8DEF"
+        android:endColor="#005B8DEF" />
+</shape>

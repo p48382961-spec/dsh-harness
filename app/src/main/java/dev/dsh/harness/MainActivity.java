@@ -754,60 +754,118 @@ public class MainActivity extends Activity {
             lp.topMargin = Math.round(startCy - size / 2f);
             h.addView(flyer, lp);
 
-            // 位移和缩小分开做定时：位移慢（680ms，强减速收尾），缩小更快一点（460ms），
-            // 看起来像"先飘过去、路上顺带变小"，比一起匀速收拢更像有重量的东西。
-            // 之前 380ms + Overshoot 太快，视觉上像被"啪"一下吸过去。
-            float dx = targetCx - startCx;
-            float dy = targetCy - startCy;
-            float endScale = dp(24) / size;
-            android.animation.ObjectAnimator tx =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.TRANSLATION_X, dx);
-            android.animation.ObjectAnimator ty =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.TRANSLATION_Y, dy);
-            android.animation.ObjectAnimator sx =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_X, endScale);
-            android.animation.ObjectAnimator sy =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_Y, endScale);
-            android.view.animation.DecelerateInterpolator glide =
-                    new android.view.animation.DecelerateInterpolator(1.7f);
-            android.view.animation.DecelerateInterpolator shrink =
-                    new android.view.animation.DecelerateInterpolator(1.3f);
-            tx.setInterpolator(glide);
-            ty.setInterpolator(glide);
-            tx.setDuration(680);
-            ty.setDuration(680);
-            sx.setInterpolator(shrink);
-            sy.setInterpolator(shrink);
-            sx.setDuration(460);
-            sy.setDuration(460);
-            sx.setStartDelay(110);
-            sy.setStartDelay(110);
+            // 飞行 = 二次贝塞尔弧线 + 旋转回正 + 分段缩放，而不是直线平移：
+            // 直线看起来像"被吸走"，弧线才有"自己飞过去"的感觉。
+            final float dx = targetCx - startCx;
+            final float dy = targetCy - startCy;
+            float dist = (float) Math.hypot(dx, dy);
+            if (dist < 1f) dist = 1f;
+            final float bend = dist * 0.18f;             // 弧度：法线方向鼓出去
+            final float cxp = startCx + dx / 2f + (-dy / dist) * bend;
+            final float cyp = startCy + dy / 2f + (dx / dist) * bend;
+            final float endScale = dp(24) / size;
 
-            android.animation.AnimatorSet set = new android.animation.AnimatorSet();
-            set.playTogether(tx, ty, sx, sy);
-            set.setStartDelay(40);
-            set.addListener(new android.animation.AnimatorListenerAdapter() {
+            // 起步辉光：跟着鱼一起"点一下"，把视线先拉过去
+            final android.view.View glow = new android.view.View(this);
+            glow.setBackgroundResource(R.drawable.ripple_glow);
+            FrameLayout.LayoutParams glp =
+                    new FrameLayout.LayoutParams(Math.round(dp(150)), Math.round(dp(150)));
+            glp.leftMargin = Math.round(startCx - dp(75));
+            glp.topMargin = Math.round(startCy - dp(75));
+            glow.setAlpha(0f);
+            glow.setScaleX(0.45f);
+            glow.setScaleY(0.45f);
+            glow.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+            h.addView(glow, glp);
+            glow.setAlpha(0.85f);
+            glow.animate().alpha(0f).scaleX(1.7f).scaleY(1.7f)
+                    .setStartDelay(40).setDuration(560)
+                    .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                    .start();
+            h.postDelayed(() -> {
+                glow.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+                h.removeView(glow);
+            }, 700);
+
+            // 位移：700ms，M3 emphasized-decelerate（尾巴长，落点稳）
+            android.animation.ValueAnimator fly = android.animation.ValueAnimator.ofFloat(0f, 1f);
+            fly.setStartDelay(40);
+            fly.setDuration(700);
+            fly.setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f));
+            fly.addUpdateListener(a -> {
+                float t = (Float) a.getAnimatedValue();
+                float u = 1f - t;
+                float x = u * u * startCx + 2f * u * t * cxp + t * t * targetCx;
+                float y = u * u * startCy + 2f * u * t * cyp + t * t * targetCy;
+                flyer.setTranslationX(x - startCx);
+                flyer.setTranslationY(y - startCy);
+            });
+
+            // 缩放：620ms，比位移先完成，看起来像"一边飞一边收进侧栏"
+            android.animation.ObjectAnimator scaleA =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_X, endScale);
+            android.animation.ObjectAnimator scaleB =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_Y, endScale);
+            for (android.animation.ObjectAnimator o : new android.animation.ObjectAnimator[]{scaleA, scaleB}) {
+                o.setStartDelay(40);
+                o.setDuration(620);
+                o.setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f));
+            }
+
+            // 旋转：起飞时稍微抬一点头（-10°），前 360ms 回正
+            flyer.setRotation(-10f);
+            android.animation.ObjectAnimator rot =
+                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.ROTATION, 0f);
+            rot.setStartDelay(40);
+            rot.setDuration(360);
+            rot.setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f));
+
+            fly.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(android.animation.Animator a) {
-                    flyer.animate().alpha(0f).setDuration(180).start();
-                    flyer.postDelayed(() -> {
-                        flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
-                        if (h != null) h.removeView(flyer);
-                    }, 220);
+                    // 落点"坐实"一下：先轻轻放大再回到目标尺寸，最后淡掉
+                    flyer.animate().scaleX(endScale * 1.15f).scaleY(endScale * 1.15f)
+                            .setDuration(90)
+                            .setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
+                            .withEndAction(() -> flyer.animate()
+                                    .scaleX(endScale).scaleY(endScale).alpha(0f)
+                                    .setDuration(170)
+                                    .setInterpolator(new android.view.animation.PathInterpolator(0.3f, 0f, 1f, 1f))
+                                    .withEndAction(() -> {
+                                        flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
+                                        if (h != null) h.removeView(flyer);
+                                    })
+                                    .start())
+                            .start();
                 }
             });
-            set.start();
+
+            fly.start();
+            scaleA.start();
+            scaleB.start();
+            rot.start();
             flying = true;
+        }
+
+        // 页面从下方 12dp 落到位：只做 translationY（合成层位移，开销远小于 alpha），
+        // 与开屏揭幕同时发生，页面像"被托上来"而不是"啪一下出现"。
+        if (w != null) {
+            w.setTranslationY(dp(12));
+            w.animate().translationY(0f)
+                    .setStartDelay(220)
+                    .setDuration(340)
+                    .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                    .start();
         }
 
         // 开屏分层退场：进度条 → 状态 → 标题 → 背景（细节见 Splash.beginHandoff）
         s.beginHandoff();
 
-        // 开屏本身 780ms 后就能撤（各层动画最晚 440ms 结束）；鱼是独立的一层，自己飞完自己清理
+        // 开屏本身 820ms 后撤（各层动画最晚 520ms 结束）；鱼是独立图层，自己飞完自己清理
         ui.postDelayed(() -> {
             if (h != null) h.removeView(s);
             s.stop();
-        }, 780);
+        }, 820);
     }
 
     private float dp(float v) {

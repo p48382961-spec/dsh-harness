@@ -11,7 +11,7 @@ import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
-import android.view.animation.DecelerateInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -136,18 +136,29 @@ public class Splash extends FrameLayout {
         if (breathe != null) breathe.cancel();
         fish.setVisibility(View.INVISIBLE);
 
-        DecelerateInterpolator ease = new DecelerateInterpolator();
-        fadeUp(bar, 0, 160, 10, ease);
-        fadeUp(statusView, 60, 200, 8, ease);
-        fadeUp(title, 100, 260, 6, ease);
-        bg.animate().alpha(0f).setStartDelay(120).setDuration(320).setInterpolator(ease).start();
+        // 离场用 M3 的 standard-accelerate（越走越快，像被推走）；
+        // 背景揭幕用 emphasized-decelerate（开头快、尾巴长，停下来不突兀）。
+        TimeInterpolator exit = new PathInterpolator(0.3f, 0f, 1f, 1f);
+        TimeInterpolator reveal = new PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
+
+        // 不是单纯淡出：一边淡一边微微放大 + 上浮，三个元素错开 50ms，看起来像散开而不是关灯
+        disperse(bar, 0, 220, 1.04f, exit);
+        disperse(statusView, 50, 240, 1.04f, exit);
+        disperse(title, 100, 260, 1.06f, exit);
+
+        // 背景要等文字开始散开后再化，先把注意力交给"飞走的那只鱼"
+        bg.animate().alpha(0f).setStartDelay(220).setDuration(300).setInterpolator(reveal).start();
     }
 
-    private void fadeUp(View v, long delay, long duration, int dyDp, TimeInterpolator ease) {
+    private void disperse(View v, long delay, long duration, float scale, TimeInterpolator ease) {
         if (v == null) return;
+        v.setPivotX(v.getWidth() / 2f);
+        v.setPivotY(v.getHeight() / 2f);
         v.animate()
                 .alpha(0f)
-                .translationY(-dp(dyDp))
+                .scaleX(scale)
+                .scaleY(scale)
+                .translationY(-dp(6))
                 .setStartDelay(delay)
                 .setDuration(duration)
                 .setInterpolator(ease)
