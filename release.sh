@@ -76,12 +76,21 @@ for a in json.load(sys.stdin):
       "https://api.github.com/repos/$OWNER/$REPO/releases/assets/$aid" > /dev/null && echo "  删旧资产 $UP_NAME"
   done
   echo "  上传 $UP_NAME（$(( $(stat -c%s "$f") /1048576 )) MB）…"
-  curl -s --progress-bar -X POST \
-    -H "Authorization: bearer $TOK" \
-    -H "Content-Type: application/octet-stream" \
-    --data-binary "@$f" \
-    "https://uploads.github.com/repos/$OWNER/$REPO/releases/$REL_ID/assets?name=$UP_NAME" \
-    -o /dev/null
+  # uploads.github.com 时不时连不上（DNS/代理抖动），而且以前 -o /dev/null 把失败全吞了，
+  # 结果 release 建出来但 0 资产。这里重试 3 次，并把 HTTP 码打出来。
+  UPLOADED=0
+  for try in 1 2 3; do
+    CODE=$(curl -s -m 900 -X POST \
+      -H "Authorization: bearer $TOK" \
+      -H "Content-Type: application/octet-stream" \
+      --data-binary "@$f" \
+      "https://uploads.github.com/repos/$OWNER/$REPO/releases/$REL_ID/assets?name=$UP_NAME" \
+      -o "$PROJ/.upload.json" -w '%{http_code}' 2>/dev/null || echo 000)
+    if [ "$CODE" = "201" ]; then UPLOADED=1; break; fi
+    echo "    第 $try 次失败（HTTP $CODE），5 秒后重试…"
+    sleep 5
+  done
+  [ "$UPLOADED" = "1" ] || { echo "✗ 上传失败：$UP_NAME（资产还没传上去，发布不完整）" >&2; exit 1; }
   echo "  完成"
 done
 
