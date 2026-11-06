@@ -519,6 +519,13 @@ function startEngineUpdate(config, version) {
     cwd: homedir()
   });
   child.unref();
+  // 设备上没有 adb：把「已开始」这件事也推到本机 8099，Termux 侧才能远程确认脚本真的被拉起
+  try {
+    const payload = JSON.stringify({ target, pid: child.pid ?? null, url: urls.url, via: urls.via, at: new Date().toISOString() });
+    void fetch(`http://127.0.0.1:8099/upload?name=engine-start.json`, { method: "POST", body: payload }).catch(() => {});
+  } catch {
+    /* 取证用，失败不影响更新 */
+  }
   return { target, script, logPath, url: urls.url, via: urls.via, pid: child.pid ?? null };
 }
 

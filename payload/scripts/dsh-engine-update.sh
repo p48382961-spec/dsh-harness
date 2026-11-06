@@ -41,18 +41,26 @@ STARTED="$(date +%s)"
 CUR="$(node -p "require('$DSH_DIR/package.json').version" 2>/dev/null || echo unknown)"
 
 log() { printf '%s %s\n' "$(date '+%m-%d %H:%M:%S')" "$*" >>"$LOG"; echo "$*"; }
+# 把某个文件 POST 到本机 8099 服务（Termux 侧可读）——设备上没有 adb，这是唯一能远程取证的路。
+push_file() {
+  local file="$1" name="$2"
+  [ -f "$file" ] || return 0
+  node -e 'const fs=require("fs");const [f,n]=process.argv.slice(1);fetch("http://127.0.0.1:8099/upload?name="+encodeURIComponent(n),{method:"POST",body:fs.readFileSync(f)}).catch(()=>{});' "$file" "$name" >/dev/null 2>&1 &
+}
 stage() {
   local id="$1" label="$2" pct="$3" done_flag="${4:-false}" err="${5:-}"
   printf '{"stage":"%s","label":"%s","pct":%s,"target":"%s","from":"%s","to":"%s","startedAt":%s,"updatedAt":%s,"done":%s,"error":%s}\n' \
     "$id" "$label" "$pct" "$VERSION" "$CUR" "$VERSION" "$STARTED" "$(date +%s)" "$done_flag" \
     "$([ -n "$err" ] && printf '"%s"' "$err" || printf 'null')" > "$STATE"
+  push_file "$STATE" "engine-state.json"
 }
 cleanup() { rm -rf "$WORK"; }
 on_exit() {
   local rc=$?
   rm -f "$FLAG"
-  cleanup
   if [ $rc -ne 0 ]; then stage "error" "引擎更新中断（退出码 $rc），现网引擎未被替换" 100 false "退出码 $rc"; fi
+  push_file "$LOG" "engine-update.log"
+  cleanup
 }
 trap on_exit EXIT INT TERM
 
