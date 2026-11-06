@@ -787,11 +787,15 @@ public class MainActivity extends Activity {
                 h.removeView(glow);
             }, 700);
 
-            // 位移：700ms，M3 emphasized-decelerate（尾巴长，落点稳）
+            // 位移与缩放绑在同一个进度上：位置走多远，鱼就缩多小。
+            // 之前两件事分开定时、而且都用 emphasized-decelerate，结果是前 250ms 就把 80% 走完，
+            // 后半段只剩一个已经缩到很小的点在慢慢爬 —— 看起来就是"没有缩小过程"。
+            // 现在换成缓入缓出的轨迹曲线（起步慢一点、中段匀、落点软），820ms 全程都在缩。
+            final long FLIGHT_MS = 820;
             android.animation.ValueAnimator fly = android.animation.ValueAnimator.ofFloat(0f, 1f);
             fly.setStartDelay(40);
-            fly.setDuration(700);
-            fly.setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f));
+            fly.setDuration(FLIGHT_MS);
+            fly.setInterpolator(new android.view.animation.PathInterpolator(0.42f, 0f, 0.18f, 1f));
             fly.addUpdateListener(a -> {
                 float t = (Float) a.getAnimatedValue();
                 float u = 1f - t;
@@ -799,37 +803,24 @@ public class MainActivity extends Activity {
                 float y = u * u * startCy + 2f * u * t * cyp + t * t * targetCy;
                 flyer.setTranslationX(x - startCx);
                 flyer.setTranslationY(y - startCy);
+                // 尺寸：从开屏尺寸线性收到侧栏图标尺寸，跟着轨迹走
+                float sc = 1f + (endScale - 1f) * t;
+                flyer.setScaleX(sc);
+                flyer.setScaleY(sc);
+                // 姿态：起飞时 -8°，落点前已经回正
+                flyer.setRotation(-8f * (1f - t));
             });
-
-            // 缩放：620ms，比位移先完成，看起来像"一边飞一边收进侧栏"
-            android.animation.ObjectAnimator scaleA =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_X, endScale);
-            android.animation.ObjectAnimator scaleB =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.SCALE_Y, endScale);
-            for (android.animation.ObjectAnimator o : new android.animation.ObjectAnimator[]{scaleA, scaleB}) {
-                o.setStartDelay(40);
-                o.setDuration(620);
-                o.setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f));
-            }
-
-            // 旋转：起飞时稍微抬一点头（-10°），前 360ms 回正
-            flyer.setRotation(-10f);
-            android.animation.ObjectAnimator rot =
-                    android.animation.ObjectAnimator.ofFloat(flyer, android.view.View.ROTATION, 0f);
-            rot.setStartDelay(40);
-            rot.setDuration(360);
-            rot.setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f));
 
             fly.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override
                 public void onAnimationEnd(android.animation.Animator a) {
-                    // 落点"坐实"一下：先轻轻放大再回到目标尺寸，最后淡掉
-                    flyer.animate().scaleX(endScale * 1.15f).scaleY(endScale * 1.15f)
+                    // 到位后先轻轻一涨，再缩一点点被"吸进"侧栏，最后淡掉
+                    flyer.animate().scaleX(endScale * 1.08f).scaleY(endScale * 1.08f)
                             .setDuration(90)
                             .setInterpolator(new android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
                             .withEndAction(() -> flyer.animate()
-                                    .scaleX(endScale).scaleY(endScale).alpha(0f)
-                                    .setDuration(170)
+                                    .scaleX(endScale * 0.9f).scaleY(endScale * 0.9f).alpha(0f)
+                                    .setDuration(180)
                                     .setInterpolator(new android.view.animation.PathInterpolator(0.3f, 0f, 1f, 1f))
                                     .withEndAction(() -> {
                                         flyer.setLayerType(android.view.View.LAYER_TYPE_NONE, null);
@@ -841,9 +832,6 @@ public class MainActivity extends Activity {
             });
 
             fly.start();
-            scaleA.start();
-            scaleB.start();
-            rot.start();
             flying = true;
         }
 
