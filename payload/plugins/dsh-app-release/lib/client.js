@@ -231,6 +231,7 @@ window.__ModuleLoader__.load({
 			// 每 1.5 秒取一次状态：脚本会一步步写 .dsh-update-state.json，
 			// 面板据此刷新进度条、当前步骤、耗时和日志尾巴。
 			var ticks = 0;
+			var sawUpdating = false;
 			var timer = setInterval(function () {
 				ticks += 1;
 				call("status")
@@ -238,6 +239,7 @@ window.__ModuleLoader__.load({
 						var engineState = (next && next.engine) || {};
 						var progress = engineState.progress || {};
 						setState({ info: next });
+						if (engineState.updating) sawUpdating = true;
 						if (progress.stage === "error") {
 							clearInterval(timer);
 							setState({
@@ -246,13 +248,22 @@ window.__ModuleLoader__.load({
 							});
 							return;
 						}
-						if (!engineState.updating) {
-							clearInterval(timer);
+						// 脚本还没被拉起的那几秒别急着下结论（0.10.22 就是这里秒判「更新完成」）
+						if (engineState.updating || (!sawUpdating && ticks < 5)) return;
+						if (engineState.updating) return;
+						clearInterval(timer);
+						var now = String(engineState.current || "").replace(/\s*\(.*$/, "");
+						if (now && target && now !== target) {
 							setState({
-								phase: "ready",
-								detail: fill(T.engineReady, { version: engineState.current || target })
+								phase: "error",
+								note: "更新没有生效：引擎仍是 " + now + "（目标 " + target + "）。看下面日志里的失败原因。"
 							});
+							return;
 						}
+						setState({
+							phase: "ready",
+							detail: fill(T.engineReady, { version: engineState.current || target })
+						});
 					})
 					.catch(function () {
 						// 引擎重启期间会短暂连不上，继续轮询即可
@@ -266,6 +277,16 @@ window.__ModuleLoader__.load({
 			var target = engine.latest;
 			if (!target) return;
 			setState({ phase: "installing", detail: T.engineUpdating });
+			try {
+				if (window.DSHBridge && window.DSHBridge.log) {
+					window.DSHBridge.log(
+						"引擎更新点击 bridge=" + Boolean(window.DSHBridge.engineUpdate) +
+						" tar=" + (engine.tarUrl || "null") + " ver=" + target
+					);
+				}
+			} catch (e) {
+				/* 诊断失败不影响更新 */
+			}
 			// 优先让 App（Java）下载引擎包：设备网络下脚本里的 node fetch 到 GitHub 资产会超时，
 			// 而 Java 的下载链路（外层 APK 更新用的同一条）一直是通的。
 			if (window.DSHBridge && window.DSHBridge.engineUpdate && engine.tarUrl) {

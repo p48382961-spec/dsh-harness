@@ -150,6 +150,7 @@ PYDROP
 cp -a "$PROJ/payload/scripts/dsh-update.sh" "$SRC/home/试玩/dsh-update.sh"
 cp -a "$PROJ/payload/scripts/dsh-engine-update.sh" "$SRC/home/试玩/dsh-engine-update.sh"
 cp -a "$PROJ/payload/scripts/dsh-engine-rollback.sh" "$SRC/home/试玩/dsh-engine-rollback.sh"
+cp -a "$PROJ/payload/scripts/engine-fetch.mjs" "$SRC/home/试玩/engine-fetch.mjs"
 cp -a "$PROJ/payload/scripts/dsh-restart.sh" "$SRC/home/dsh-restart.sh"
 cp -a "$PROJ/payload/scripts/patch-payload.mjs" "$SRC/home/试玩/patch-payload.mjs"
 chmod 755 "$SRC/home/试玩/dsh-update.sh" "$SRC/home/试玩/dsh-engine-update.sh" "$SRC/home/试玩/dsh-engine-rollback.sh" "$SRC/home/dsh-restart.sh"

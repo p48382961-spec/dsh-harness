@@ -390,10 +390,7 @@ async function buildStatus(config, { network }) {
 
   const [appResult, engineResult] = await Promise.allSettled([checkApp(config), checkEngine(config)]);
 
-  // 引擎包地址交给 App（Java）去下载：rootfs 里 node fetch 到 GitHub 资产会超时
-  if (engine.latest) {
-    engine.tarUrl = engineUrls(engine.latest).url;
-  }
+
 
   if (appResult.status === "fulfilled") {
     const { latest, apk, sum, via, degraded } = appResult.value;
@@ -429,6 +426,10 @@ async function buildStatus(config, { network }) {
       bundleOnly: true,
       pageUrl
     });
+    // 引擎包地址交给 App（Java）去下载：rootfs 里 node fetch 到 GitHub 资产会超时。
+    // 注意必须放在这里——engine.latest 是上面这行才赋的值（0.10.21 放在前面，
+    // 结果 tarUrl 永远是 null，点「更新引擎」又退回脚本自己下载，直接失败）。
+    if (latest) engine.tarUrl = engineUrls(latest).url;
   } else {
     engine.checked = true;
     engine.error = String(engineResult.reason?.message ?? engineResult.reason);
