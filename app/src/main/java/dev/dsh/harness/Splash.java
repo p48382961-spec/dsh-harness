@@ -210,8 +210,8 @@ public class Splash extends FrameLayout {
 
         // 不是单纯淡出：一边淡一边微微放大 + 上浮，三个元素错开，看起来像散开而不是关灯
         if (bar != null) {
+            // 只走一个 ViewPropertyAnimator：同一 View 上再调一次 animate() 会把 alpha 动画一起重启
             bar.fadeOut(0, 260);
-            bar.animate().translationY(-dp(6)).setDuration(300).start();
         }
         disperse(statusView, 70, 320, 1.03f, exit);
         disperse(title, 130, 360, 1.05f, exit);
