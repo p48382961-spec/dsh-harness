@@ -67,6 +67,35 @@ final class Engine {
      *
      * @return 本次新起的引擎的 token；若引擎本来就在跑则返回 null（调用方用 cookie 打开首页即可）
      */
+    /**
+     * 把上一版引擎目录换回来（引擎包升级失败时的补救）。
+     * 升级脚本会把旧版留成 {@code dsh.old-<时间戳>}，这里取最新的那份换回去。
+     */
+    static synchronized boolean rollbackEngine(Context ctx) {
+        try {
+            File root = Rootfs.dir(ctx);
+            File mods = new File(root, "usr/lib/node_modules/@deepseek-ai");
+            File cur = new File(mods, "dsh");
+            File[] olds = mods.listFiles((d, name) -> name.startsWith("dsh.old-"));
+            if (olds == null || olds.length == 0 || !cur.isDirectory()) return false;
+            java.util.Arrays.sort(olds, (a, b) -> b.getName().compareTo(a.getName()));
+            File old = olds[0];
+            File failed = new File(mods, "dsh.failed-" + new java.text.SimpleDateFormat(
+                    "yyyyMMdd-HHmmss", java.util.Locale.US).format(new java.util.Date()));
+            if (!cur.renameTo(failed)) return false;
+            if (!old.renameTo(cur)) {
+                //noinspection ResultOfMethodCallIgnored
+                failed.renameTo(cur);
+                return false;
+            }
+            Life.note(ctx, "引擎已回滚到 " + old.getName());
+            return true;
+        } catch (Throwable e) {
+            Log.e(TAG, "rollback 失败", e);
+            return false;
+        }
+    }
+
     static synchronized String ensure(final Context ctx, final Note note) throws Exception {
         final File root = Rootfs.dir(ctx);
         tokenFile = new File(root, "engine.token");
@@ -103,6 +132,12 @@ final class Engine {
 
             if (note != null) note.say("启动引擎（linker64 + node）…");
             String t = spawn(root, note);
+            if (t == null && rollbackEngine(ctx)) {
+                // 新引擎起不来（升级包有问题）：换回上一版，再试一次。
+                if (note != null) note.say("新引擎没起来，已回滚到上一版…");
+                Life.note(ctx, "引擎启动失败，自动回滚到上一版后重试");
+                t = spawn(root, note);
+            }
             if (t == null) {
                 lastError = "引擎没起来了（90 秒内没拿到 token）";
                 return null;
