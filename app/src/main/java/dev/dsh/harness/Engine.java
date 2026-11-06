@@ -372,6 +372,67 @@ final class Engine {
         return found;
     }
 
+    /**
+     * 用 App 已经下载好的引擎包换引擎。
+     *
+     * 为什么不在脚本里下：rootfs 里的 node fetch 走到 GitHub 资产会超时（设备网络对
+     * objects.githubusercontent.com 不稳定），而 Java 的 HttpURLConnection 走系统代理解析，
+     * 与外层 APK 下载是同一条路（那条一直是通的）。所以下载交给 Java，脚本只管校验/解包/换目录。
+     */
+    static boolean applyEnginePackage(final Context ctx, final File tar, final String version) {
+        File root = Rootfs.dir(ctx);
+        File script = new File(root, "home/试玩/dsh-engine-update.sh");
+        File bash = new File(root, "usr/bin/bash");
+        if (!script.isFile()) {
+            lastError = "缺少引擎更新脚本: " + script;
+            return false;
+        }
+        if (!bash.isFile()) {
+            lastError = "缺少 bash: " + bash;
+            return false;
+        }
+        List<String> cmd = new ArrayList<>();
+        cmd.add("/system/bin/linker64");
+        cmd.add(bash.getAbsolutePath());
+        cmd.add(script.getAbsolutePath());
+        cmd.add(version);
+        cmd.add(tar.getAbsolutePath());
+        cmd.add("-"); // 本地包：第三个参数用 "-" 表示跳过远端 sha 比对
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        pb.directory(new File(root, "home"));
+        pb.environment().put("LD_LIBRARY_PATH", new File(root, "usr/lib").getAbsolutePath());
+        pb.environment().put("HOME", new File(root, "home").getAbsolutePath());
+        pb.environment().put("DSH_HOME", new File(root, "home/.dsh").getAbsolutePath());
+        pb.environment().put("TMPDIR", new File(root, "home/tmp").getAbsolutePath());
+        pb.environment().put("PATH", new File(root, "usr/bin").getAbsolutePath() + ":/system/bin:/system/xbin");
+        pb.environment().put("LANG", "zh_CN.UTF-8");
+        pb.environment().put("OPENSSL_CONF", new File(root, "usr/etc/tls/openssl.cnf").getAbsolutePath());
+        pb.environment().put("SSL_CERT_FILE", new File(root, "usr/etc/tls/cert.pem").getAbsolutePath());
+        pb.environment().put("SSL_CERT_DIR", new File(root, "usr/etc/tls").getAbsolutePath());
+        pb.environment().put("TZ", "Asia/Shanghai");
+        pb.environment().put("PREFIX", new File(root, "usr").getAbsolutePath());
+        pb.environment().put("SHELL", bash.getAbsolutePath());
+        try {
+            final Process p = pb.start();
+            new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        Log.i(TAG, "engine-update: " + line);
+                        remember(line);
+                    }
+                } catch (Throwable ignored) {
+                    /* 进程结束时流会断，正常 */
+                }
+            }, "engine-update-watch").start();
+            return true;
+        } catch (Throwable e) {
+            lastError = "拉起引擎更新脚本失败: " + e;
+            return false;
+        }
+    }
+
     /** 拿完 token 后继续消费输出（不读会堵管道，引擎会卡住）。 */
     private static void watch(final BufferedReader out, final Process p) {
         Thread t = new Thread(() -> {

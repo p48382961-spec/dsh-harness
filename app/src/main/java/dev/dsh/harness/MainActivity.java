@@ -506,6 +506,17 @@ public class MainActivity extends Activity {
             Life.note(MainActivity.this, "JS 请求下载 " + url);
             startDownload(url, null, null);
         }
+
+        /**
+         * 「更新引擎」走这里：Java 先下载引擎包（与 APK 下载同一条网络路），下完再交给脚本换目录。
+         * rootfs 里的 node fetch 到 GitHub 资产会超时，所以不让脚本自己下载。
+         */
+        @android.webkit.JavascriptInterface
+        public void engineUpdate(String tarUrl, String version) {
+            if (tarUrl == null || tarUrl.isEmpty() || version == null || version.isEmpty()) return;
+            Life.note(MainActivity.this, "JS 请求更新引擎 " + version + " <- " + tarUrl);
+            downloadEngine(tarUrl, version);
+        }
     }
 
     /**
@@ -617,6 +628,68 @@ public class MainActivity extends Activity {
             else b.append(c);
         }
         return b.append('"').toString();
+    }
+
+    /**
+     * 下载引擎包到 files/updates/。走的是与外层 APK 相同的 HttpURLConnection 链路：
+     * 设备网络下 node fetch 到 objects.githubusercontent.com 会超时，而这条一直是通的。
+     */
+    private void downloadEngine(final String url, final String version) {
+        final String tag = "引擎包 " + version;
+        new Thread(() -> {
+            File dir = new File(getFilesDir(), "updates");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            File out = new File(dir, "engine-" + version + ".tar.gz");
+            File part = new File(dir, "engine-" + version + ".part");
+            java.net.HttpURLConnection conn = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                conn.setConnectTimeout(20000);
+                conn.setReadTimeout(120000);
+                conn.setInstanceFollowRedirects(true);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) DSHShell");
+                int code = conn.getResponseCode();
+                if (code >= 400) throw new java.io.IOException("HTTP " + code);
+                final long expect = Math.max(0L, conn.getContentLengthLong());
+                dlProgress(tag, 0, expect, "start");
+                long total = 0;
+                try (java.io.InputStream in = conn.getInputStream();
+                     java.io.OutputStream os = new java.io.BufferedOutputStream(
+                             new java.io.FileOutputStream(part), 256 * 1024)) {
+                    byte[] buf = new byte[256 * 1024];
+                    long lastTick = 0;
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        os.write(buf, 0, n);
+                        total += n;
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (now - lastTick >= 150) {
+                            lastTick = now;
+                            dlProgress(tag, total, expect, "downloading");
+                        }
+                    }
+                }
+                //noinspection ResultOfMethodCallIgnored
+                part.renameTo(out);
+                Life.note(this, "引擎包下载完成 " + out + " " + out.length() + " B");
+                dlProgress(tag, out.length(), out.length(), "done");
+                boolean ok = Engine.applyEnginePackage(this, out, version);
+                if (!ok) {
+                    Life.note(this, "引擎更新脚本启动失败：" + Engine.lastError());
+                    dlProgress(tag, 0, 0, "error");
+                    ui.post(() -> showToast("引擎包下载好了，但更新脚本起不来：" + Engine.lastError()));
+                } else {
+                    ui.post(() -> showToast("引擎包已就绪，正在换引擎…"));
+                }
+            } catch (Throwable e) {
+                Life.note(this, "引擎包下载失败 " + e);
+                dlProgress(tag, 0, 0, "error");
+                ui.post(() -> showToast("引擎包下载失败：" + e));
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }, "engine-download").start();
     }
 
     private void startDownload(final String url, final String contentDisposition, final String mime) {

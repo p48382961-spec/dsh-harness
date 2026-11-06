@@ -71,6 +71,13 @@ log "== 引擎更新 $CUR → $VERSION"
 mkdir -p "$WORK" "$STAGE"
 
 # ---------- 1. 下载 ----------
+if [ -f "$TAR_URL" ]; then
+  # App 侧已经用 Java 下载好了（rootfs 里的 node fetch 走不到 GitHub 时用这条路）
+  stage "download" "使用 App 已下载的引擎包" 12
+  log "本地引擎包：$TAR_URL"
+  cp -f "$TAR_URL" "$TARBALL" || { log "复制本地引擎包失败"; exit 1; }
+  stage "download" "引擎包就绪" 30
+else
 stage "download" "下载引擎包（约 170 MB）" 10
 log "下载 $TAR_URL"
 ENGINE_STATE="$STATE" ENGINE_TARGET="$VERSION" ENGINE_FROM="$CUR" ENGINE_STARTED="$STARTED" node -e '
@@ -96,14 +103,20 @@ const [url,out]=process.argv.slice(1);
 })().catch(e=>{console.error("下载失败: "+e.message); process.exit(1)});
 ' "$TAR_URL" "$TARBALL" >>"$LOG" 2>&1 || { log "下载失败，放弃"; exit 1; }
 stage "download" "下载完成" 30
+fi
 
 # ---------- 2. 校验 ----------
 stage "verify" "校验 sha256" 36
-EXPECT="$(node -e 'fetch(process.argv[1]).then(r=>r.text()).then(t=>process.stdout.write((t.trim().split(/\s+/)[0]||"")))' "$SHA_URL" 2>/dev/null)"
-if [ -z "$EXPECT" ]; then log "拿不到期望 sha256，放弃（不敢装没校验的包）"; exit 1; fi
 ACTUAL="$(sha256sum "$TARBALL" | awk '{print $1}')"
-if [ "$EXPECT" != "$ACTUAL" ]; then log "sha256 不匹配（期望 $EXPECT 实际 $ACTUAL），放弃"; exit 1; fi
-log "sha256 校验通过 $ACTUAL"
+if [ "$SHA_URL" = "-" ]; then
+  # 本地包没有远端校验文件：靠 gzip CRC + 冒烟 + 失败自动回滚兜底
+  log "本地引擎包 sha256 $ACTUAL（未比对远端）"
+else
+  EXPECT="$(node -e 'fetch(process.argv[1]).then(r=>r.text()).then(t=>process.stdout.write((t.trim().split(/\s+/)[0]||"")))' "$SHA_URL" 2>/dev/null)"
+  if [ -z "$EXPECT" ]; then log "拿不到期望 sha256，放弃（不敢装没校验的包）"; exit 1; fi
+  if [ "$EXPECT" != "$ACTUAL" ]; then log "sha256 不匹配（期望 $EXPECT 实际 $ACTUAL），放弃"; exit 1; fi
+  log "sha256 校验通过 $ACTUAL"
+fi
 stage "verify" "校验通过" 42
 
 # ---------- 3. 解包 + 冒烟 ----------

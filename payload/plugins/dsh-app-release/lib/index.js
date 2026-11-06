@@ -370,6 +370,7 @@ async function buildStatus(config, { network }) {
     updating: updatingNow(),
     progress: null,
     logTail: [],
+    tarUrl: null,
     log: join(homedir(), "试玩", UPDATE_LOG)
   };
 
@@ -388,6 +389,11 @@ async function buildStatus(config, { network }) {
   }
 
   const [appResult, engineResult] = await Promise.allSettled([checkApp(config), checkEngine(config)]);
+
+  // 引擎包地址交给 App（Java）去下载：rootfs 里 node fetch 到 GitHub 资产会超时
+  if (engine.latest) {
+    engine.tarUrl = engineUrls(engine.latest).url;
+  }
 
   if (appResult.status === "fulfilled") {
     const { latest, apk, sum, via, degraded } = appResult.value;
