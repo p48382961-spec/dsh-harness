@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
     private WebView web;
     private WebView popup;
     private FrameLayout host;
+    private Splash splash;
     private TextView status;
     private volatile boolean loaded;
     /** 页面自愈：失败页/黑屏时后台盯着引擎，一旦健康就自动重载。 */
@@ -81,16 +82,10 @@ public class MainActivity extends Activity {
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        status = new TextView(this);
-        status.setTextColor(Color.parseColor("#9aa4b2"));
-        status.setTextSize(12f);
-        status.setPadding(28, 18, 28, 30);
-        status.setBackgroundColor(Color.parseColor("#E60f1115"));
-        status.setText("启动中…");
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.gravity = Gravity.BOTTOM;
-        root.addView(status, lp);
+        // 启动屏盖在最上层：冷启动期间（解包 / 起 node / 等 HTTP）不再是一块纯黑
+        splash = new Splash(this);
+        root.addView(splash, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
         applyFullscreen();
@@ -221,6 +216,7 @@ public class MainActivity extends Activity {
         boolean ok = Diag.upload(name, sb.toString());
         note(why + "\n启动日志" + (ok ? "已回传：logs/" + name : "回传失败（下载服务没开？）")
                 + "\n最后输出：\n" + String.join("\n", tail));
+        hideSplash(0);
         showFailurePage(why, ok ? name : null, tail);
         startHeal();
     }
@@ -367,6 +363,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 Life.note(MainActivity.this, "页面加载完成 " + url);
+                hideSplash(120);
                 injectProbe(v, url);
             }
 
@@ -703,8 +700,25 @@ public class MainActivity extends Activity {
     private void note(String msg) {
         Log.i(TAG, msg);
         ui.post(() -> {
+            Splash s = splash;
+            if (s != null) s.setStatus(msg);
             if (status != null && !loaded) status.setText(msg);
         });
+    }
+
+    /** 页面画出来了（或要显示错误页）就淡出启动屏。 */
+    private void hideSplash(long delay) {
+        final Splash s = splash;
+        if (s == null) return;
+        ui.postDelayed(() -> {
+            if (splash != s) return;
+            s.animate().alpha(0f).setDuration(260).withEndAction(() -> {
+                FrameLayout h = host;
+                if (h != null) h.removeView(s);
+                if (splash == s) splash = null;
+                s.stop();
+            }).start();
+        }, delay);
     }
 
     @Override
