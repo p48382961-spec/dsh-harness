@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 鱼标背后的柔光：中心极淡的蓝，向外快速衰减到全透明。
+     用形状渐变而不是模糊滤镜 —— 模糊要 software layer，反而更贵 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="100dp"
+        android:startColor="#2E7AA2FF"
+        android:centerColor="#127AA2FF"
+        android:endColor="#007AA2FF" />
+</shape>

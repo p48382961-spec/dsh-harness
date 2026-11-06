@@ -31,7 +31,8 @@ public class Splash extends FrameLayout {
     private final ImageView fish;
     private final TextView title;
     private final TextView statusView;
-    private final View bar;
+    private final CometBar bar;
+    private final View glow;
 
     private String status = "正在启动…";
     private ObjectAnimator floatAnim;
@@ -52,6 +53,7 @@ public class Splash extends FrameLayout {
         title = findViewById(R.id.title);
         statusView = findViewById(R.id.status);
         bar = findViewById(R.id.bar);
+        glow = findViewById(R.id.glow);
 
         fish.setImageBitmap(fishBitmap());
         statusView.setText(status);
@@ -63,6 +65,19 @@ public class Splash extends FrameLayout {
         // 开屏本身必须第一帧就完全不透明，否则会透出还没准备好的页面。
         setAlpha(1f);
         startLogoAnimation();
+
+        // 标题与加载条也入场，不然画面里只有鱼在动，其它部分像"贴"上去的
+        title.setAlpha(0f);
+        title.setTranslationY(dp(6));
+        title.animate().alpha(1f).translationY(0f).setStartDelay(120).setDuration(420)
+                .setInterpolator(new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f))
+                .start();
+        if (bar != null) {
+            bar.setAlpha(0f);
+            bar.animate().alpha(1f).setStartDelay(260).setDuration(360).start();
+            bar.start();
+        }
+        startGlowBreath();
     }
 
     /** 官方图标（与桌面图标同一份路径）预栅格化成 Bitmap，避免缩放时重新栅格化矢量。 */
@@ -91,6 +106,23 @@ public class Splash extends FrameLayout {
         breathe.setRepeatMode(ValueAnimator.REVERSE);
         breathe.setInterpolator(new AccelerateDecelerateInterpolator());
         breathe.start();
+    }
+
+    private ObjectAnimator glowBreath;
+
+    private void startGlowBreath() {
+        if (glow == null) return;
+        glowBreath = ObjectAnimator.ofFloat(glow, View.ALPHA, 0.55f, 1f);
+        glowBreath.setDuration(3000);
+        glowBreath.setRepeatCount(ValueAnimator.INFINITE);
+        glowBreath.setRepeatMode(ValueAnimator.REVERSE);
+        glowBreath.setInterpolator(new AccelerateDecelerateInterpolator());
+        glowBreath.start();
+    }
+
+    /** 真实进度（0..1）。目前引擎侧只给得到文字，留着以后接数值。 */
+    public void setProgress(float p) {
+        if (bar != null) bar.setProgress(p);
     }
 
     private void revealStatus() {
@@ -135,6 +167,7 @@ public class Splash extends FrameLayout {
         if (stopped) return;
         if (floatAnim != null) floatAnim.cancel();
         if (breathe != null) breathe.cancel();
+        if (glowBreath != null) glowBreath.cancel();
         fish.setVisibility(View.INVISIBLE);
 
         // 离场用 M3 的 standard-accelerate（越走越快，像被推走）；
@@ -142,13 +175,33 @@ public class Splash extends FrameLayout {
         TimeInterpolator exit = new PathInterpolator(0.3f, 0f, 1f, 1f);
         TimeInterpolator reveal = new PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
 
-        // 不是单纯淡出：一边淡一边微微放大 + 上浮，三个元素错开 50ms，看起来像散开而不是关灯
-        disperse(bar, 0, 220, 1.04f, exit);
-        disperse(statusView, 50, 240, 1.04f, exit);
-        disperse(title, 100, 260, 1.06f, exit);
+        // 不是单纯淡出：一边淡一边微微放大 + 上浮，三个元素错开，看起来像散开而不是关灯
+        if (bar != null) {
+            bar.fadeOut(0, 260);
+            bar.animate().translationY(-dp(6)).setDuration(300).start();
+        }
+        disperse(statusView, 70, 320, 1.03f, exit);
+        disperse(title, 130, 360, 1.05f, exit);
 
-        // 背景要等文字开始散开后再化，先把注意力交给"飞走的那只鱼"
-        bg.animate().alpha(0f).setStartDelay(220).setDuration(300).setInterpolator(reveal).start();
+        // 柔光跟着"散开"：一边放大一边淡掉，像光被页面吸走
+        if (glow != null) {
+            glow.animate().scaleX(1.55f).scaleY(1.55f).alpha(0f)
+                    .setStartDelay(40).setDuration(560).setInterpolator(reveal).start();
+        }
+
+        // 背景是很长的一段交叉淡出（760ms），把页面"揭"出来，而不是一黑变一亮。
+        // 用关键帧做两段速度：先快一点让画面"亮起来"，再拖一条长尾巴收尾。
+        android.animation.ObjectAnimator bgAnim = android.animation.ObjectAnimator.ofPropertyValuesHolder(
+                bg,
+                android.animation.PropertyValuesHolder.ofKeyframe(View.ALPHA,
+                        android.animation.Keyframe.ofFloat(0f, 1f),
+                        android.animation.Keyframe.ofFloat(0.18f, 0.74f),
+                        android.animation.Keyframe.ofFloat(0.52f, 0.30f),
+                        android.animation.Keyframe.ofFloat(1f, 0f)));
+        bgAnim.setStartDelay(60);
+        bgAnim.setDuration(760);
+        bgAnim.setInterpolator(new android.view.animation.LinearInterpolator());
+        bgAnim.start();
     }
 
     private void disperse(View v, long delay, long duration, float scale, TimeInterpolator ease) {
@@ -168,6 +221,11 @@ public class Splash extends FrameLayout {
 
     public void stop() {
         stopped = true;
+        if (bar != null) bar.stop();
+        if (glowBreath != null) {
+            glowBreath.cancel();
+            glowBreath = null;
+        }
         if (floatAnim != null) {
             floatAnim.cancel();
             floatAnim = null;

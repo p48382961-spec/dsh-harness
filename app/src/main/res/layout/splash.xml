@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 启动屏：官方鱼标 + 标题 + 状态 + 原生不确定进度条（原生动画，不掉帧）
-     背景单独一层（@id/splashBg），交接时只化掉它，文案与进度条各自错开淡出 -->
+<!-- 启动屏：官方鱼标（背后一层柔光）+ 标题 + 状态 + 自绘彗星加载条
+     背景单独一层（@id/splashBg），交接时用一段较长的交叉淡出化掉，
+     文案与加载条各自错开淡出，鱼则交给外面的飞行层接力 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/splashRoot"
     android:layout_width="match_parent"
@@ -18,29 +19,44 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
+        android:clipChildren="false"
         android:gravity="center_horizontal"
-        android:orientation="vertical"
-        android:paddingBottom="24dp">
+        android:orientation="vertical">
 
+        <!-- 舞台：200dp 见方，装柔光 + 鱼标。柔光比鱼大得多，单独一层才不会被 badge 裁掉 -->
         <FrameLayout
-            android:id="@+id/badge"
-            android:layout_width="96dp"
-            android:layout_height="88dp">
+            android:id="@+id/stage"
+            android:layout_width="200dp"
+            android:layout_height="200dp">
 
-            <ImageView
-                android:id="@+id/fish"
-                android:layout_width="88dp"
-                android:layout_height="88dp"
+            <View
+                android:id="@+id/glow"
+                android:layout_width="200dp"
+                android:layout_height="200dp"
                 android:layout_gravity="center"
-                android:contentDescription="@null"
-                android:src="@drawable/ic_fish" />
+                android:background="@drawable/splash_glow" />
+
+            <FrameLayout
+                android:id="@+id/badge"
+                android:layout_width="96dp"
+                android:layout_height="88dp"
+                android:layout_gravity="center">
+
+                <ImageView
+                    android:id="@+id/fish"
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_fish" />
+            </FrameLayout>
         </FrameLayout>
 
         <TextView
             android:id="@+id/title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="4dp"
             android:letterSpacing="0.01"
             android:text="DeepSeek Harness"
             android:textColor="#ECEEF1"
@@ -60,15 +76,11 @@
             android:textColor="#8B929C"
             android:textSize="13sp" />
 
-        <ProgressBar
+        <dev.dsh.harness.CometBar
             android:id="@+id/bar"
-            style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="168dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="26dp"
-            android:indeterminate="true"
-            android:indeterminateTint="#7AA2FF"
-            android:progressBackgroundTint="#23272F" />
+            android:layout_height="10dp"
+            android:layout_marginTop="28dp" />
     </LinearLayout>
 
 </FrameLayout>
