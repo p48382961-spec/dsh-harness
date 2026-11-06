@@ -49,3 +49,16 @@ new PathInterpolator(0.2f, 0f, 0f, 1f);
 
 - 页面里侧栏鱼标到位那一刻没有"呼应"（我们控制不到侧栏内部，只能让飞行层在落点淡出）
 - 想要更"贵"的话可以做：背景加极轻的视差（开屏 logo 上浮时背景渐变轻微移动）、状态文字用逐字淡入
+
+## 六、0.10.15：掉帧不是"动画不好看"，是动画第一帧在干重活
+
+倒推交接动画第一帧同时做的事，任何一件都足以掉帧：
+
+| 第一帧在干的活 | 为什么贵 | 现在怎么做 |
+|---|---|---|
+| `web.setVisibility(VISIBLE)` 才显示页面 | 全屏 WebView 的**首次绘制+合成**压在这一帧 | WebView 从启动就 VISIBLE，在开屏幕布下把首绘做完 |
+| `web.animate().translationY(12dp→0)` | 每帧移动一个全屏 WebView（重合成） | 完全不碰 WebView，"揭开"只由开屏图层完成 |
+| `host.addView(flyer, lp)` + 改 margin | 与 WebView 同一层的**全量重排** | 飞行层/辉光启动时预建在独立 `overlay`，交接只改变换属性 |
+| 交接与页面首绘抢同一帧 | 首绘的耗时直接体现为动画丢帧 | `web.postOnAnimation` → `splash.postOnAnimation` 再等两帧才开始 |
+
+补充：开屏的入场淡入（200ms）也删了 —— WebView 在下面，开屏第一帧就必须不透明。
