@@ -34,6 +34,11 @@ public class MainActivity extends Activity {
     private WebView web;
     private WebView popup;
     private FrameLayout host;
+    /** 侧栏鱼标（窄轨里那个）在页面里的实测位置，CSS px；由页面 JS 量完回调 Bridge.anchor。 */
+    private volatile float anchorCx = -1f;
+    private volatile float anchorCy = -1f;
+    private volatile float anchorSize = 0f;
+
     private Splash splash;
     private TextView status;
     /** 交接动画用的独立图层：启动时就建好、常驻，交接时只改变换属性 —— 不增删视图、不触发重排。 */
@@ -477,6 +482,19 @@ public class MainActivity extends Activity {
          * 页面里点「下载更新」时直接调这里。
          * 走导航的话会被 shouldOverrideUrlLoading 当成外部链接丢给浏览器（用户看到的就是「点了没反应」）。
          */
+        /**
+         * 页面量好鱼标位置后回调这里。单位是 CSS px（在 WebView 里 1 CSS px ≈ 1dp）。
+         * 交接动画的落点用它，而不是用我拍脑袋估的 (28,30)。
+         */
+        @android.webkit.JavascriptInterface
+        public void anchor(float cx, float cy, float size) {
+            anchorCx = cx;
+            anchorCy = cy;
+            anchorSize = size;
+            Life.note(MainActivity.this, "JS anchor=" + Math.round(cx) + "," + Math.round(cy)
+                    + " size=" + Math.round(size));
+        }
+
         @android.webkit.JavascriptInterface
         public void download(String url) {
             if (url == null || url.isEmpty()) return;
@@ -491,7 +509,16 @@ public class MainActivity extends Activity {
      */
     private void injectProbe(WebView v, String url) {
         if (!url.startsWith("http://127.0.0.1")) return;
-        String js = "(function(){if(window.__dshbProbe)return;window.__dshbProbe=1;"
+        String js = "(function(){"
+                // 量侧栏鱼标的位置（窄轨时它在折叠按钮里）。每次页面加载都量一遍，接口幂等。
+                + "try{if(!window.__dshbMeasure){window.__dshbMeasure=function(){"
+                + "try{var el=document.querySelector('[class*=\"railMark\"] svg')||document.querySelector('[class*=\"railMark\"]')"
+                + "||document.querySelector('[class*=\"brandMark\"] svg');"
+                + "if(!el)return false;var r=el.getBoundingClientRect();"
+                + "if(!(r.width>0)||!(r.height>0))return false;"
+                + "DSHBridge.anchor(r.left+r.width/2,r.top+r.height/2,r.width);return true;}catch(e){return false;}};}"
+                + "var tries=0;(function tick(){if(window.__dshbMeasure())return;if(++tries<25)setTimeout(tick,200);})();}catch(e){}"
+                + "if(window.__dshbProbe)return;window.__dshbProbe=1;"
                 + "try{var o=window.open;window.open=function(u,n,f){var r=null;try{r=o.call(window,u,n,f)}catch(e){}"
                 + "try{DSHBridge.log('window.open('+String(u).slice(0,100)+','+n+') -> '+(r?'句柄':'null'))}catch(e){}"
                 + "return r;};}catch(e){try{DSHBridge.log('hook failed '+e)}catch(_){}}"
@@ -773,9 +800,13 @@ public class MainActivity extends Activity {
             float size = geo[2] > 0 ? geo[2] : dp(FISH_DP);
             float startCx = geo[0];
             float startCy = geo[1];
-            float targetCx = dp(28);
-            float targetCy = dp(30);
-            float endScale = dp(24) / size;
+            // 落点：优先用页面实测的鱼标位置（CSS px ≈ dp，乘密度换成 px）；
+            // 量不到才退回老的估算值 —— 这就是上一版"飞到偏了"的地方。
+            final float density = getResources().getDisplayMetrics().density;
+            final float targetCx = anchorCx > 0f ? anchorCx * density : dp(28);
+            final float targetCy = anchorCy > 0f ? anchorCy * density : dp(30);
+            final float aimSize = anchorSize > 0f ? anchorSize * density : dp(24);
+            float endScale = aimSize / size;
 
             // 视图是启动时按 FISH_DP 布局在 overlay 左上角的，这里只算"从布局位置出发要偏移多少"。
             float laidCx = dp(FISH_DP) / 2f;
